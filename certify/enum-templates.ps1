@@ -7,6 +7,13 @@ param(
 
 Import-Module "$PSScriptRoot/Certify.Defensive.Common.psm1" -Force
 
+$DomainController = Resolve-CertifyDefensiveDomainController -DomainControllerParameter $DomainController
+if ([string]::IsNullOrWhiteSpace($OutFile)) {
+    $OutFile = Join-Path -Path (Get-Location).Path -ChildPath "templates-risk.json"
+}
+
+Write-CertifyDefensiveExecutionContext -DomainController $DomainController
+
 Write-Section "Certificate Templates (Defensive Enumeration)"
 $configNc = Get-ConfigurationNamingContext -DomainController $DomainController
 $ldapPath = if ($DomainController) { "LDAP://$DomainController/CN=Certificate Templates,CN=Public Key Services,CN=Services,$configNc" } else { "LDAP://CN=Certificate Templates,CN=Public Key Services,CN=Services,$configNc" }
@@ -40,5 +47,5 @@ if ($FilterVulnerable) {
     $items = $items | Where-Object { $_.RiskCount -gt 0 }
 }
 
-$items | Sort-Object RiskCount -Descending, Name | Format-Table -AutoSize
+$items | Sort-Object @{ Expression = 'RiskCount'; Descending = $true }, @{ Expression = 'Name'; Descending = $false } | Format-Table -AutoSize
 Export-DefensiveReport -InputObject $items -OutFile $OutFile

@@ -1,10 +1,18 @@
 param(
-    [string]$Principal = "$env:USERDOMAIN\$env:USERNAME",
+    [string]$Principal,
     [switch]$WhatIfOnly = $true,
     [string]$OutFile
 )
 
 Import-Module "$PSScriptRoot/Certify.Defensive.Common.psm1" -Force
+
+$Principal = Resolve-CertifyDefensiveEnvString -ParameterValue $Principal -EnvironmentVariableNames @('CERTIFY_PRINCIPAL')
+
+if ([string]::IsNullOrWhiteSpace($Principal)) {
+    $Principal = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+}
+
+Write-CertifyDefensiveExecutionContext -DomainController $null
 
 Write-Section "Self-Permission Technique (Defensive Principal Review)"
 

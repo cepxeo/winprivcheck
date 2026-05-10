@@ -5,6 +5,9 @@ param(
 
 Import-Module "$PSScriptRoot/Certify.Defensive.Common.psm1" -Force
 
+$DomainController = Resolve-CertifyDefensiveDomainController -DomainControllerParameter $DomainController
+Write-CertifyDefensiveExecutionContext -DomainController $DomainController
+
 Write-Section "PKI Objects (Defensive Enumeration)"
 $configNc = Get-ConfigurationNamingContext -DomainController $DomainController
 $basePath = if ($DomainController) { "LDAP://$DomainController/CN=Public Key Services,CN=Services,$configNc" } else { "LDAP://CN=Public Key Services,CN=Services,$configNc" }

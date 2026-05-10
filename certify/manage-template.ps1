@@ -1,5 +1,4 @@
 param(
-    [Parameter(Mandatory = $true)]
     [string]$Template,
     [string]$Action,
     [switch]$WhatIfOnly = $true,
@@ -7,6 +6,15 @@ param(
 )
 
 Import-Module "$PSScriptRoot/Certify.Defensive.Common.psm1" -Force
+
+$Template = Resolve-CertifyDefensiveEnvString -ParameterValue $Template -EnvironmentVariableNames @('CERTIFY_TEMPLATE')
+$Action = Resolve-CertifyDefensiveEnvString -ParameterValue $Action -EnvironmentVariableNames @('CERTIFY_MANAGE_ACTION')
+
+if ([string]::IsNullOrWhiteSpace($Template)) {
+    throw "Template is required. Use -Template or set CERTIFY_TEMPLATE."
+}
+
+Write-CertifyDefensiveExecutionContext -DomainController $null
 
 Write-Section "Template Management Technique (Defensive Change Review)"
 

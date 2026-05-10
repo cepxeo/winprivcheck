@@ -1,5 +1,4 @@
 param(
-    [Parameter(Mandatory = $true)]
     [string]$CAName,
     [string]$Action,
     [switch]$WhatIfOnly = $true,
@@ -7,6 +6,15 @@ param(
 )
 
 Import-Module "$PSScriptRoot/Certify.Defensive.Common.psm1" -Force
+
+$CAName = Resolve-CertifyDefensiveEnvString -ParameterValue $CAName -EnvironmentVariableNames @('CERTIFY_CA_NAME')
+$Action = Resolve-CertifyDefensiveEnvString -ParameterValue $Action -EnvironmentVariableNames @('CERTIFY_MANAGE_ACTION')
+
+if ([string]::IsNullOrWhiteSpace($CAName)) {
+    throw "CAName is required. Use -CAName or set CERTIFY_CA_NAME."
+}
+
+Write-CertifyDefensiveExecutionContext -DomainController $null
 
 Write-Section "CA Management Technique (Defensive Change Review)"
 

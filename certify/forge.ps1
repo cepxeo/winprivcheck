@@ -7,6 +7,11 @@ param(
 
 Import-Module "$PSScriptRoot/Certify.Defensive.Common.psm1" -Force
 
+$CAName = Resolve-CertifyDefensiveEnvString -ParameterValue $CAName -EnvironmentVariableNames @('CERTIFY_CA_NAME')
+$TargetIdentity = Resolve-CertifyDefensiveEnvString -ParameterValue $TargetIdentity -EnvironmentVariableNames @('CERTIFY_TARGET_IDENTITY')
+
+Write-CertifyDefensiveExecutionContext -DomainController $null
+
 Write-Section "Certificate Forgery Technique (Defensive Risk Assessment)"
 
 $analysis = [pscustomobject]@{

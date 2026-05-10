@@ -1,5 +1,114 @@
 Set-StrictMode -Version Latest
 
+# Environment variables (optional; effective value = process, then user, then machine):
+#   CERTIFY_DC, CERTIFY_DEFENSIVE_DC, CERTIFY_DOMAIN_CONTROLLER — optional LDAP host override (DC DNS name)
+#   If none are set, the DC that answers LDAP RootDSE (dnsHostName) is used automatically.
+#   CERTIFY_CA_NAME, CERTIFY_TEMPLATE, CERTIFY_AGENT_TEMPLATE, CERTIFY_TARGET_TEMPLATE,
+#   CERTIFY_ON_BEHALF_OF, CERTIFY_REQUEST_ID, CERTIFY_CERT_THUMBPRINT, CERTIFY_SUBJECT,
+#   CERTIFY_SAN, CERTIFY_MANAGE_ACTION, CERTIFY_PRINCIPAL, CERTIFY_TARGET_IDENTITY
+# LDAP uses integrated auth (current Windows logon / process token); no alternate credentials.
+
+function Get-CertifyDefensiveDiscoveredDomainControllerDns {
+    # Same LDAP connection Windows uses by default — dnsHostName is the answering DC's FQDN.
+    # Optional RSAT cmdlet (if installed): (Get-ADDomainController -Discover -Service GlobalCatalog).Hostname
+    $auth = [System.DirectoryServices.AuthenticationTypes]::Negotiate
+    try {
+        $root = New-Object System.DirectoryServices.DirectoryEntry("LDAP://RootDSE", $null, $null, $auth)
+        $dnsProp = $root.Properties["dnsHostName"]
+        if ($null -eq $dnsProp -or $dnsProp.Count -lt 1) {
+            return $null
+        }
+        return ([string]$dnsProp[0]).Trim()
+    }
+    catch {
+        return $null
+    }
+}
+
+function Resolve-CertifyDefensiveDomainController {
+    [CmdletBinding()]
+    param(
+        [string]$DomainControllerParameter
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($DomainControllerParameter)) {
+        return $DomainControllerParameter.Trim()
+    }
+
+    foreach ($name in @('CERTIFY_DC', 'CERTIFY_DEFENSIVE_DC', 'CERTIFY_DOMAIN_CONTROLLER')) {
+        $v = [Environment]::GetEnvironmentVariable($name)
+        if (-not [string]::IsNullOrWhiteSpace($v)) {
+            return $v.Trim()
+        }
+    }
+
+    return Get-CertifyDefensiveDiscoveredDomainControllerDns
+}
+
+function Resolve-CertifyDefensiveEnvString {
+    [CmdletBinding()]
+    param(
+        [string]$ParameterValue,
+        [Parameter(Mandatory = $true)]
+        [string[]]$EnvironmentVariableNames
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ParameterValue)) {
+        return $ParameterValue.Trim()
+    }
+
+    foreach ($name in $EnvironmentVariableNames) {
+        $v = [Environment]::GetEnvironmentVariable($name)
+        if (-not [string]::IsNullOrWhiteSpace($v)) {
+            return $v.Trim()
+        }
+    }
+
+    return [string]::Empty
+}
+
+function Resolve-CertifyDefensiveEnvInt {
+    [CmdletBinding()]
+    param(
+        $ParameterValue,
+        [Parameter(Mandatory = $true)]
+        [string[]]$EnvironmentVariableNames
+    )
+
+    if ($null -ne $ParameterValue) {
+        return [int]$ParameterValue
+    }
+
+    foreach ($name in $EnvironmentVariableNames) {
+        $v = [Environment]::GetEnvironmentVariable($name)
+        if (-not [string]::IsNullOrWhiteSpace($v)) {
+            $parsed = 0
+            if ([int]::TryParse($v.Trim(), [ref]$parsed)) {
+                return $parsed
+            }
+        }
+    }
+
+    return $null
+}
+
+function Write-CertifyDefensiveExecutionContext {
+    [CmdletBinding()]
+    param(
+        [string]$DomainController
+    )
+
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    Write-Host "Security context: $($identity.Name) (Negotiate / current process token)" -ForegroundColor DarkGray
+
+    if ([string]::IsNullOrWhiteSpace($DomainController)) {
+        Write-Host "LDAP server:      not resolved (domain/RootDSE unavailable); default naming paths only" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host "LDAP server:      $DomainController (-DomainController / CERTIFY_* / or auto from RootDSE dnsHostName)" -ForegroundColor DarkGray
+    }
+}
+
 function Write-Section {
     param(
         [Parameter(Mandatory = $true)]
@@ -16,15 +125,17 @@ function Get-ConfigurationNamingContext {
         [string]$DomainController
     )
 
+    $auth = [System.DirectoryServices.AuthenticationTypes]::Negotiate
+
     try {
         if ($DomainController) {
-            $root = [ADSI]"LDAP://$DomainController/RootDSE"
+            $root = New-Object System.DirectoryServices.DirectoryEntry("LDAP://$DomainController/RootDSE", $null, $null, $auth)
         }
         else {
-            $root = [ADSI]"LDAP://RootDSE"
+            $root = New-Object System.DirectoryServices.DirectoryEntry("LDAP://RootDSE", $null, $null, $auth)
         }
 
-        return [string]$root.configurationNamingContext
+        return [string]$root.Properties["configurationNamingContext"][0]
     }
     catch {
         throw "Unable to query RootDSE. Ensure domain connectivity and permissions. $($_.Exception.Message)"
@@ -43,7 +154,8 @@ function Search-Ldap {
         [string[]]$Properties = @("*")
     )
 
-    $entry = New-Object System.DirectoryServices.DirectoryEntry($LdapPath)
+    $auth = [System.DirectoryServices.AuthenticationTypes]::Negotiate
+    $entry = New-Object System.DirectoryServices.DirectoryEntry($LdapPath, $null, $null, $auth)
     $searcher = New-Object System.DirectoryServices.DirectorySearcher($entry)
     $searcher.Filter = $Filter
     $searcher.PageSize = 200
@@ -136,5 +248,10 @@ Export-ModuleMember -Function @(
     "Search-Ldap",
     "Convert-SearchResultToObject",
     "Test-TemplateRisk",
-    "Export-DefensiveReport"
+    "Export-DefensiveReport",
+    "Resolve-CertifyDefensiveDomainController",
+    "Get-CertifyDefensiveDiscoveredDomainControllerDns",
+    "Resolve-CertifyDefensiveEnvString",
+    "Resolve-CertifyDefensiveEnvInt",
+    "Write-CertifyDefensiveExecutionContext"
 )

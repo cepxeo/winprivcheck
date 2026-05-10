@@ -1,9 +1,6 @@
 param(
-    [Parameter(Mandatory = $true)]
     [string]$CAName,
-    [Parameter(Mandatory = $true)]
     [string]$AgentTemplate,
-    [Parameter(Mandatory = $true)]
     [string]$TargetTemplate,
     [string]$OnBehalfOf,
     [switch]$WhatIfOnly = $true,
@@ -11,6 +8,17 @@ param(
 )
 
 Import-Module "$PSScriptRoot/Certify.Defensive.Common.psm1" -Force
+
+$CAName = Resolve-CertifyDefensiveEnvString -ParameterValue $CAName -EnvironmentVariableNames @('CERTIFY_CA_NAME')
+$AgentTemplate = Resolve-CertifyDefensiveEnvString -ParameterValue $AgentTemplate -EnvironmentVariableNames @('CERTIFY_AGENT_TEMPLATE')
+$TargetTemplate = Resolve-CertifyDefensiveEnvString -ParameterValue $TargetTemplate -EnvironmentVariableNames @('CERTIFY_TARGET_TEMPLATE')
+$OnBehalfOf = Resolve-CertifyDefensiveEnvString -ParameterValue $OnBehalfOf -EnvironmentVariableNames @('CERTIFY_ON_BEHALF_OF')
+
+if ([string]::IsNullOrWhiteSpace($CAName) -or [string]::IsNullOrWhiteSpace($AgentTemplate) -or [string]::IsNullOrWhiteSpace($TargetTemplate)) {
+    throw "CAName, AgentTemplate, and TargetTemplate are required. Use parameters or CERTIFY_CA_NAME, CERTIFY_AGENT_TEMPLATE, CERTIFY_TARGET_TEMPLATE."
+}
+
+Write-CertifyDefensiveExecutionContext -DomainController $null
 
 Write-Section "Enrollment Agent Technique (Defensive Simulation)"
 

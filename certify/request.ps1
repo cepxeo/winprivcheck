@@ -1,7 +1,5 @@
 param(
-    [Parameter(Mandatory = $true)]
     [string]$CAName,
-    [Parameter(Mandatory = $true)]
     [string]$Template,
     [string]$Subject,
     [string]$San,
@@ -10,6 +8,17 @@ param(
 )
 
 Import-Module "$PSScriptRoot/Certify.Defensive.Common.psm1" -Force
+
+$CAName = Resolve-CertifyDefensiveEnvString -ParameterValue $CAName -EnvironmentVariableNames @('CERTIFY_CA_NAME')
+$Template = Resolve-CertifyDefensiveEnvString -ParameterValue $Template -EnvironmentVariableNames @('CERTIFY_TEMPLATE')
+$Subject = Resolve-CertifyDefensiveEnvString -ParameterValue $Subject -EnvironmentVariableNames @('CERTIFY_SUBJECT')
+$San = Resolve-CertifyDefensiveEnvString -ParameterValue $San -EnvironmentVariableNames @('CERTIFY_SAN')
+
+if ([string]::IsNullOrWhiteSpace($CAName) -or [string]::IsNullOrWhiteSpace($Template)) {
+    throw "CAName and Template are required. Pass -CAName / -Template or set CERTIFY_CA_NAME and CERTIFY_TEMPLATE."
+}
+
+Write-CertifyDefensiveExecutionContext -DomainController $null
 
 Write-Section "Certificate Request Technique (Defensive Simulation)"
 

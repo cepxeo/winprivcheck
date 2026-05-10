@@ -1,13 +1,26 @@
 param(
-    [Parameter(Mandatory = $true)]
     [string]$CAName,
-    [Parameter(Mandatory = $true)]
-    [int]$RequestId,
+    $RequestId,
     [switch]$WhatIfOnly = $true,
     [string]$OutFile
 )
 
 Import-Module "$PSScriptRoot/Certify.Defensive.Common.psm1" -Force
+
+$CAName = Resolve-CertifyDefensiveEnvString -ParameterValue $CAName -EnvironmentVariableNames @('CERTIFY_CA_NAME')
+
+$requestIdFromParam = $null
+if ($PSBoundParameters.ContainsKey('RequestId') -and $null -ne $RequestId -and "$RequestId" -ne '') {
+    $requestIdFromParam = [int]$RequestId
+}
+
+$RequestId = Resolve-CertifyDefensiveEnvInt -ParameterValue $requestIdFromParam -EnvironmentVariableNames @('CERTIFY_REQUEST_ID')
+
+if ([string]::IsNullOrWhiteSpace($CAName) -or $null -eq $RequestId) {
+    throw "CAName and RequestId are required. Use parameters or set CERTIFY_CA_NAME and CERTIFY_REQUEST_ID."
+}
+
+Write-CertifyDefensiveExecutionContext -DomainController $null
 
 Write-Section "Issued Certificate Retrieval Technique (Defensive Simulation)"
 

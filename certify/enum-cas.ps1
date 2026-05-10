@@ -5,6 +5,9 @@ param(
 
 Import-Module "$PSScriptRoot/Certify.Defensive.Common.psm1" -Force
 
+$DomainController = Resolve-CertifyDefensiveDomainController -DomainControllerParameter $DomainController
+Write-CertifyDefensiveExecutionContext -DomainController $DomainController
+
 Write-Section "Enterprise CAs (Defensive Enumeration)"
 $configNc = Get-ConfigurationNamingContext -DomainController $DomainController
 $ldapPath = if ($DomainController) { "LDAP://$DomainController/CN=Enrollment Services,CN=Public Key Services,CN=Services,$configNc" } else { "LDAP://CN=Enrollment Services,CN=Public Key Services,CN=Services,$configNc" }
