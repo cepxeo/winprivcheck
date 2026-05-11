@@ -75,7 +75,10 @@ function Invoke-SharpHoundDCOnly {
 
         [ValidateRange(30, 3600)]
         [Int]
-        $LdapTimeoutSeconds = 300
+        $LdapTimeoutSeconds = 300,
+
+        [Switch]
+        $DisableLdapPartitioning
     )
 
     Set-StrictMode -Version 2.0
@@ -446,21 +449,59 @@ function Invoke-SharpHoundDCOnly {
         $searcher = New-LdapSearcher -Server $Server -SearchBase $SearchBase -Filter $effectiveFilter -Properties $Properties -IncludeSecurityDescriptor:$IncludeSecurityDescriptor -Name $Name
 
         $timer = [System.Diagnostics.Stopwatch]::StartNew()
-        $results = @()
+        $results = New-Object System.Collections.ArrayList
         try {
             $rawResults = $searcher.FindAll()
             foreach ($result in $rawResults) {
-                $results += $result
+                [void]$results.Add($result)
             }
             $timer.Stop()
             Write-Stage -Name 'LDAP' -Message "Completed '$Name': $(@($results).Count) result(s) in $([Math]::Round($timer.Elapsed.TotalSeconds, 2))s"
-            return $results
+            return @($results)
         } catch {
             $timer.Stop()
             Write-Warning "$Name failed against ${SearchBase}: $($_.Exception.Message)"
             Write-Stage -Name 'LDAP' -Message "Completed '$Name': returning $(@($results).Count) partial result(s) after failure in $([Math]::Round($timer.Elapsed.TotalSeconds, 2))s"
-            return $results
+            return @($results)
         }
+    }
+
+    function Invoke-PartitionedLdapQuery {
+        param(
+            [String]$Server,
+            [String]$SearchBase,
+            [String]$Filter,
+            [String[]]$Properties,
+            [Switch]$IncludeSecurityDescriptor,
+            [String]$Name
+        )
+
+        if ($DisableLdapPartitioning) {
+            return Invoke-LdapQuery -Server $Server -SearchBase $SearchBase -Filter $Filter -Properties $Properties -IncludeSecurityDescriptor:$IncludeSecurityDescriptor -Name $Name
+        }
+
+        Write-Stage -Name 'LDAP' -Message "Partitioning '$Name' into 256 objectGUID buckets"
+        $allResults = New-Object System.Collections.ArrayList
+        $timer = [System.Diagnostics.Stopwatch]::StartNew()
+
+        for ($i = 0; $i -lt 256; $i++) {
+            $hex = $i.ToString('x2')
+            $partitionName = "$Name partition $hex"
+            $partitionFilter = "(&${Filter}(objectGUID=\$hex*))"
+            $partitionResults = Invoke-LdapQuery -Server $Server -SearchBase $SearchBase -Filter $partitionFilter -Properties $Properties -IncludeSecurityDescriptor:$IncludeSecurityDescriptor -Name $partitionName
+
+            if (@($partitionResults).Count -eq 0) {
+                Write-Verbose "$partitionName returned no objects"
+            }
+
+            foreach ($partitionResult in $partitionResults) {
+                [void]$allResults.Add($partitionResult)
+            }
+        }
+
+        $timer.Stop()
+        Write-Stage -Name 'LDAP' -Message "Completed partitioned '$Name': $(@($allResults).Count) total result(s) in $([Math]::Round($timer.Elapsed.TotalSeconds, 2))s"
+        return @($allResults)
     }
 
     function Get-ObjectClasses {
@@ -846,6 +887,7 @@ function Invoke-SharpHoundDCOnly {
 
     $aclStatus = if ($NoACL) { 'disabled' } else { 'enabled' }
     $ldapTransport = if ($SecureLDAP) { 'LDAPS' } else { 'LDAP' }
+    $partitionStatus = if ($DisableLdapPartitioning) { 'disabled' } else { 'enabled' }
 
     Write-Stage -Name 'Start' -Message 'Starting PowerShell DCOnly collection'
     Write-Stage -Name 'Start' -Message "Output directory: $OutputDirectory"
@@ -853,6 +895,7 @@ function Invoke-SharpHoundDCOnly {
     Write-Stage -Name 'Start' -Message "LDAP transport: $ldapTransport"
     Write-Stage -Name 'Start' -Message "LDAP page size: $PageSize"
     Write-Stage -Name 'Start' -Message "LDAP timeout: $LdapTimeoutSeconds second(s)"
+    Write-Stage -Name 'Start' -Message "LDAP partitioning: $partitionStatus"
     if ($DomainController) {
         Write-Stage -Name 'Start' -Message "Domain controller override: $DomainController"
     }
@@ -955,7 +998,7 @@ function Invoke-SharpHoundDCOnly {
         }
 
         foreach ($query in (Get-DefaultNamingContextQueries)) {
-            $results = Invoke-LdapQuery -Server $DomainController -SearchBase $target.NamingContext -Filter $query.Filter -Properties $defaultProperties -IncludeSecurityDescriptor:(-not $NoACL) -Name $query.Name
+            $results = Invoke-PartitionedLdapQuery -Server $DomainController -SearchBase $target.NamingContext -Filter $query.Filter -Properties $defaultProperties -IncludeSecurityDescriptor:(-not $NoACL) -Name $query.Name
 
             Write-Stage -Name 'Process' -Message "Classifying $(@($results).Count) result(s) from '$($query.Name)' for $domainName"
             foreach ($result in $results) {
