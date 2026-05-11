@@ -825,7 +825,7 @@ function Get-TemplateVulnerabilities {
         }
 
         if ($esc4) {
-            $vulnerabilities[4] = 'The template has insecure delegated permissions.'
+            $vulnerabilities['4'] = 'The template has insecure delegated permissions.'
         }
     }
 
@@ -842,24 +842,24 @@ function Get-TemplateVulnerabilities {
 
     if (-not $managerApproval -and $TemplateObject.AuthorizedSignatures -eq 0 -and $hasEnrollRights) {
         if ($hasClientAuth -and (Test-Flag -Value $TemplateObject.CertificateNameFlag -Flag $script:NameFlags.ENROLLEE_SUPPLIES_SUBJECT)) {
-            $vulnerabilities[1] = 'The template has a client authentication EKU and allows enrollees to supply subject.'
+            $vulnerabilities['1'] = 'The template has a client authentication EKU and allows enrollees to supply subject.'
         }
 
         if (-not (Test-Flag -Value $TemplateObject.CertificateNameFlag -Flag $script:NameFlags.ENROLLEE_SUPPLIES_SUBJECT)) {
             if ($null -eq $TemplateObject.ExtendedKeyUsage -or $eku.Count -eq 0) {
-                $vulnerabilities[2] = 'The template has no EKUs (Subordinate CA).'
+                $vulnerabilities['2'] = 'The template has no EKUs (Subordinate CA).'
             }
             elseif ($eku -contains $script:CommonOids.AnyPurpose) {
-                $vulnerabilities[2] = "The template has the 'Any Purpose' EKU."
+                $vulnerabilities['2'] = "The template has the 'Any Purpose' EKU."
             }
         }
 
         if ($null -ne $TemplateObject.ExtendedKeyUsage -and $eku -contains $script:CommonOids.CertificateRequestAgent) {
             if ($eku -contains $script:CommonOids.AnyPurpose) {
-                $vulnerabilities[3] = "The template has the 'Certificate Request Agent' EKU, but only works for schema version 1 templates."
+                $vulnerabilities['3'] = "The template has the 'Certificate Request Agent' EKU, but only works for schema version 1 templates."
             }
             else {
-                $vulnerabilities[3] = "The template has the 'Certificate Request Agent' EKU."
+                $vulnerabilities['3'] = "The template has the 'Certificate Request Agent' EKU."
             }
         }
 
@@ -869,21 +869,21 @@ function Get-TemplateVulnerabilities {
                 (Test-Flag -Value $TemplateObject.CertificateNameFlag -Flag $script:NameFlags.SUBJECT_ALT_REQUIRE_DNS)
 
             if ($requiresAlt) {
-                $vulnerabilities[9] = 'The template has a client authentication EKU and no security extension.'
+                $vulnerabilities['9'] = 'The template has a client authentication EKU and no security extension.'
             }
             else {
-                $vulnerabilities[9] = 'The template has a client authentication EKU and no security extension, but only works with ESC6.'
+                $vulnerabilities['9'] = 'The template has a client authentication EKU and no security extension, but only works with ESC6.'
             }
         }
 
         $issuancePoliciesWithGroups = @($TemplateObject.IssuancePolicies | Where-Object { -not [string]::IsNullOrWhiteSpace($_.GroupLink) })
         $authOidsForEsc13 = @($script:CommonOids.ClientAuthentication, $script:CommonOids.PKINITClientAuthentication, $script:CommonOids.SmartcardLogon)
         if ($null -ne $TemplateObject.ExtendedKeyUsage -and @($eku | Where-Object { $authOidsForEsc13 -contains $_ }).Count -gt 0 -and $issuancePoliciesWithGroups.Count -gt 0) {
-            $vulnerabilities[13] = 'The template has client authentication and an issuance policy linked to one or more domain group(s).'
+            $vulnerabilities['13'] = 'The template has client authentication and an issuance policy linked to one or more domain group(s).'
         }
 
         if ($TemplateObject.SchemaVersion -eq 1 -and (Test-Flag -Value $TemplateObject.CertificateNameFlag -Flag $script:NameFlags.ENROLLEE_SUPPLIES_SUBJECT)) {
-            $vulnerabilities[15] = 'The template has schema version 1 and allows enrollees to supply subject.'
+            $vulnerabilities['15'] = 'The template has schema version 1 and allows enrollees to supply subject.'
         }
     }
 
@@ -1173,7 +1173,7 @@ function Update-CaRuntimeInfo {
 
     $vulnerabilities = [ordered]@{}
     if ($CA.UserSpecifiedSan -eq 'Enabled') {
-        $vulnerabilities[6] = 'The CA allows enrollees to specify SANs.'
+        $vulnerabilities['6'] = 'The CA allows enrollees to specify SANs.'
     }
 
     if ($null -ne $CA.ServerSecurityDescriptor) {
@@ -1191,7 +1191,7 @@ function Update-CaRuntimeInfo {
         }
 
         if ($esc7) {
-            $vulnerabilities[7] = 'The CA has insecure delegated security roles or permissions.'
+            $vulnerabilities['7'] = 'The CA has insecure delegated security roles or permissions.'
         }
     }
 
@@ -1200,21 +1200,21 @@ function Update-CaRuntimeInfo {
         $httpUrl = "http://$($CA.DnsHostname)/certsrv/"
         $httpsUrl = "https://$($CA.DnsHostname)/certsrv/"
         if ([CertifyPowerShell.EnumTemplatesHttpUtilQuiet]::AuthWithChannelBinding($httpUrl) -and [CertifyPowerShell.EnumTemplatesHttpUtilQuiet]::AuthWithoutChannelBinding($httpUrl)) {
-            $vulnerabilities[8] = 'The CA supports HTTP web enrollment without channel binding.'
+            $vulnerabilities['8'] = 'The CA supports HTTP web enrollment without channel binding.'
         }
         elseif ([CertifyPowerShell.EnumTemplatesHttpUtilQuiet]::AuthWithChannelBinding($httpsUrl) -and [CertifyPowerShell.EnumTemplatesHttpUtilQuiet]::AuthWithoutChannelBinding($httpsUrl)) {
-            $vulnerabilities[8] = 'The CA supports HTTPS web enrollment without channel binding.'
+            $vulnerabilities['8'] = 'The CA supports HTTPS web enrollment without channel binding.'
         }
     }
     catch {
     }
 
     if ($CA.RpcRequestEncryption -eq 'Disabled') {
-        $vulnerabilities[11] = 'The CA does not enforce encryption on the ICertPassage RPC interface.'
+        $vulnerabilities['11'] = 'The CA does not enforce encryption on the ICertPassage RPC interface.'
     }
 
     if (@($CA.DisabledExtensions) -contains $script:CommonOids.NtdsCaSecurityExt) {
-        $vulnerabilities[16] = 'The CA has disabled the security extension.'
+        $vulnerabilities['16'] = 'The CA has disabled the security extension.'
     }
 
     $CA.Vulnerabilities = $vulnerabilities
@@ -1249,9 +1249,10 @@ function Write-CertificateInfo {
 function Convert-CaRightsToString {
     param([uint32]$Rights)
 
-    $names = foreach ($key in $script:CaRights.Keys) {
-        if (Test-Flag -Value $Rights -Flag ([uint32]$key)) {
-            $script:CaRights[$key]
+    $names = foreach ($entry in $script:CaRights.GetEnumerator()) {
+        $flag = ConvertTo-UInt32String $entry.Key
+        if (Test-Flag -Value $Rights -Flag $flag) {
+            [string]$entry.Value
         }
     }
 
@@ -1363,7 +1364,7 @@ function Write-EnterpriseCaInfo {
 
     if ($CA.Vulnerabilities.Count -gt 0) {
         Write-Host '    Vulnerabilities'
-        foreach ($key in @($CA.Vulnerabilities.Keys | Sort-Object)) {
+        foreach ($key in @($CA.Vulnerabilities.Keys | Sort-Object { [int]$_ })) {
             Write-Host ("      {0,-27} : {1}" -f "ESC$key", $CA.Vulnerabilities[$key])
         }
     }
@@ -1525,7 +1526,7 @@ function Write-CertificateTemplateInfo {
 
     if ($TemplateObject.Vulnerabilities.Count -gt 0) {
         Write-Host '    Vulnerabilities'
-        foreach ($key in @($TemplateObject.Vulnerabilities.Keys | Sort-Object)) {
+        foreach ($key in @($TemplateObject.Vulnerabilities.Keys | Sort-Object { [int]$_ })) {
             Write-Host ("      {0,-35} : {1}" -f "ESC$key", $TemplateObject.Vulnerabilities[$key])
         }
     }
@@ -1540,48 +1541,6 @@ function Write-CertificateTemplateInfo {
     }
     else {
         Write-AllowPermissions -SecurityDescriptor $TemplateObject.SecurityDescriptor -ShouldHideAdmins $ShouldHideAdmins
-    }
-}
-
-function Export-ConsoleOutput {
-    param(
-        [Parameter(Mandatory = $true)]
-        [scriptblock]$ScriptBlock,
-        [string]$Path
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        try {
-            & $ScriptBlock
-        }
-        catch {
-            Write-Host "[X] Unhandled enum-templates error: $($_.Exception.Message)"
-            if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
-                Write-Host $_.InvocationInfo.PositionMessage
-            }
-            if ($_.ScriptStackTrace) {
-                Write-Host $_.ScriptStackTrace
-            }
-        }
-        return
-    }
-
-    $dir = Split-Path -Path $Path -Parent
-    if (-not [string]::IsNullOrWhiteSpace($dir) -and -not (Test-Path -Path $dir)) {
-        New-Item -Path $dir -ItemType Directory -Force | Out-Null
-    }
-
-    try {
-        & $ScriptBlock *> $Path
-    }
-    catch {
-        "[X] Unhandled enum-templates error: $($_.Exception.Message)" | Add-Content -Path $Path
-        if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
-            $_.InvocationInfo.PositionMessage | Add-Content -Path $Path
-        }
-        if ($_.ScriptStackTrace) {
-            $_.ScriptStackTrace | Add-Content -Path $Path
-        }
     }
 }
 
@@ -1717,6 +1676,44 @@ function Invoke-EnumTemplates {
     }
 }
 
-Export-ConsoleOutput -Path $OutFile -ScriptBlock {
-    Invoke-EnumTemplates
+if ([string]::IsNullOrWhiteSpace($OutFile)) {
+    try {
+        Invoke-EnumTemplates
+    }
+    catch {
+        Write-Host "[X] Unhandled enum-templates error: $($_.Exception.Message)"
+        if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+            Write-Host $_.InvocationInfo.PositionMessage
+        }
+        if ($_.ScriptStackTrace) {
+            Write-Host $_.ScriptStackTrace
+        }
+    }
+}
+else {
+    $dir = Split-Path -Path $OutFile -Parent
+    if (-not [string]::IsNullOrWhiteSpace($dir) -and -not (Test-Path -Path $dir)) {
+        New-Item -Path $dir -ItemType Directory -Force | Out-Null
+    }
+
+    $transcriptStarted = $false
+    try {
+        Start-Transcript -Path $OutFile -Force | Out-Null
+        $transcriptStarted = $true
+        Invoke-EnumTemplates
+    }
+    catch {
+        Write-Host "[X] Unhandled enum-templates error: $($_.Exception.Message)"
+        if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+            Write-Host $_.InvocationInfo.PositionMessage
+        }
+        if ($_.ScriptStackTrace) {
+            Write-Host $_.ScriptStackTrace
+        }
+    }
+    finally {
+        if ($transcriptStarted) {
+            Stop-Transcript | Out-Null
+        }
+    }
 }

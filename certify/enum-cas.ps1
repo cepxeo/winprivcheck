@@ -490,7 +490,7 @@ function Update-CaRuntimeInfo {
 
     $vulnerabilities = [ordered]@{}
     if ($CA.UserSpecifiedSan -eq 'Enabled') {
-        $vulnerabilities[6] = 'The CA allows enrollees to specify SANs.'
+        $vulnerabilities['6'] = 'The CA allows enrollees to specify SANs.'
     }
 
     if ($null -ne $CA.ServerSecurityDescriptor) {
@@ -508,25 +508,25 @@ function Update-CaRuntimeInfo {
         }
 
         if ($esc7) {
-            $vulnerabilities[7] = 'The CA has insecure delegated security roles or permissions.'
+            $vulnerabilities['7'] = 'The CA has insecure delegated security roles or permissions.'
         }
     }
 
     $httpUrl = "http://$($CA.DnsHostname)/certsrv/"
     $httpsUrl = "https://$($CA.DnsHostname)/certsrv/"
     if ((Test-UrlExists -Url $httpUrl -AuthType 'NTLM') -and (Test-UrlExists -Url $httpUrl -AuthType 'Negotiate')) {
-        $vulnerabilities[8] = 'The CA supports HTTP web enrollment without channel binding.'
+        $vulnerabilities['8'] = 'The CA supports HTTP web enrollment without channel binding.'
     }
     elseif ((Test-UrlExists -Url $httpsUrl -AuthType 'NTLM') -and (Test-UrlExists -Url $httpsUrl -AuthType 'Negotiate')) {
-        $vulnerabilities[8] = 'The CA supports HTTPS web enrollment without channel binding.'
+        $vulnerabilities['8'] = 'The CA supports HTTPS web enrollment without channel binding.'
     }
 
     if ($CA.RpcRequestEncryption -eq 'Disabled') {
-        $vulnerabilities[11] = 'The CA does not enforce encryption on the ICertPassage RPC interface.'
+        $vulnerabilities['11'] = 'The CA does not enforce encryption on the ICertPassage RPC interface.'
     }
 
     if (@($CA.DisabledExtensions) -contains $script:CommonOids.NtdsCaSecurityExt) {
-        $vulnerabilities[16] = 'The CA has disabled the security extension.'
+        $vulnerabilities['16'] = 'The CA has disabled the security extension.'
     }
 
     $CA.Vulnerabilities = $vulnerabilities
@@ -687,9 +687,10 @@ function Write-CertificateInfo {
 function Convert-CaRightsToString {
     param([uint32]$Rights)
 
-    $names = foreach ($key in $script:CaRights.Keys) {
-        if (Test-Flag -Value $Rights -Flag ([uint32]$key)) {
-            $script:CaRights[$key]
+    $names = foreach ($entry in $script:CaRights.GetEnumerator()) {
+        $flag = ConvertTo-UInt32 $entry.Key
+        if (Test-Flag -Value $Rights -Flag $flag) {
+            [string]$entry.Value
         }
     }
 
@@ -765,7 +766,7 @@ function Write-EnterpriseCaInfo {
 
     if ($CA.Vulnerabilities.Count -gt 0) {
         Write-Host '    Vulnerabilities'
-        foreach ($key in @($CA.Vulnerabilities.Keys | Sort-Object)) {
+        foreach ($key in @($CA.Vulnerabilities.Keys | Sort-Object { [int]$_ })) {
             Write-Host ("      {0,-27} : {1}" -f "ESC$key", $CA.Vulnerabilities[$key])
         }
     }
