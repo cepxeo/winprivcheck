@@ -227,20 +227,20 @@ function Get-SecurityDescriptor {
 function Get-Certificates {
     param([System.DirectoryServices.SearchResult]$SearchResult)
 
-    $values = Get-SearchValues -SearchResult $SearchResult -Name 'cacertificate'
-    if ($null -eq $values) {
+    if (-not $SearchResult.Properties.Contains('cacertificate')) {
         return $null
     }
 
+    $values = $SearchResult.Properties['cacertificate']
     $dn = [string](Get-SearchValue -SearchResult $SearchResult -Name 'distinguishedname')
-    $index = 0
-    foreach ($raw in @($values)) {
-        $index++
+    for ($i = 0; $i -lt $values.Count; $i++) {
+        $raw = $values[$i]
         if ($null -ne $raw) {
             try {
                 New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList @(,[byte[]]$raw)
             }
             catch {
+                $index = $i + 1
                 Write-Host "[!] Warning: Unable to parse cACertificate value #$index for '$dn': $($_.Exception.Message)"
             }
         }

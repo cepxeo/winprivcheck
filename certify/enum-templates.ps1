@@ -60,7 +60,7 @@ $script:NameFlags = @{
     SUBJECT_REQUIRE_DNS_AS_CN              = [uint32]0x10000000
     SUBJECT_REQUIRE_EMAIL                  = [uint32]0x20000000
     SUBJECT_REQUIRE_COMMON_NAME            = [uint32]0x40000000
-    SUBJECT_REQUIRE_DIRECTORY_PATH         = [uint32]0x80000000
+    SUBJECT_REQUIRE_DIRECTORY_PATH         = [uint32]2147483648
 }
 
 $script:EnrollmentFlags = @{
@@ -1032,11 +1032,13 @@ function Get-EnterpriseCAs {
         $name = [string](Get-SearchValue -SearchResult $result -Name 'name')
         $dnsHostName = [string](Get-SearchValue -SearchResult $result -Name 'dnshostname')
         $templates = Get-SearchValues -SearchResult $result -Name 'certificatetemplates'
-        $certificateIndex = 0
-        $certificates = foreach ($certBytes in @($result.Properties['cacertificate'])) {
-            $certificateIndex++
-            if ($null -ne $certBytes) {
-                Get-CertificateInfo -Bytes ([byte[]]$certBytes) -DistinguishedName $dn -Index $certificateIndex
+        $certificates = if ($result.Properties.Contains('cacertificate')) {
+            $certificateValues = $result.Properties['cacertificate']
+            for ($i = 0; $i -lt $certificateValues.Count; $i++) {
+                $certBytes = $certificateValues[$i]
+                if ($null -ne $certBytes) {
+                    Get-CertificateInfo -Bytes ([byte[]]$certBytes) -DistinguishedName $dn -Index ($i + 1)
+                }
             }
         }
 
