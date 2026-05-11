@@ -119,7 +119,7 @@ function Invoke-SharpHoundDCOnly {
             $Value
         )
 
-        Write-Stage -Name 'Summary' -Message "$Name: $(Get-CollectionCount -Value $Value)"
+        Write-Stage -Name 'Summary' -Message "${Name}: $(Get-CollectionCount -Value $Value)"
     }
 
     function ConvertTo-CollectorJson {
