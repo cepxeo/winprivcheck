@@ -265,9 +265,8 @@ namespace CertifyPowerShell
                     var response = SynchronizeHttpTask(() => client.GetAsync(url));
                     return response.StatusCode == HttpStatusCode.OK;
                 }
-                catch (Exception e)
+                catch (Exception)
                 {
-                    Console.WriteLine("[X] AuthWithChannelBinding HTTP request for URL '" + url + "' failed with error: " + e.Message);
                     return false;
                 }
             }
@@ -287,7 +286,6 @@ namespace CertifyPowerShell
                 SECURITY_INTEGER clientLifeTime;
                 if (AcquireCredentialsHandle(WindowsIdentity.GetCurrent().Name, "NTLM", 2, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, out credHandle, out clientLifeTime) != 0)
                 {
-                    Console.WriteLine("[X] AuthWithoutChannelBinding: failed to acquire credentials handle.");
                     return false;
                 }
 
@@ -308,15 +306,13 @@ namespace CertifyPowerShell
                         var response = SynchronizeHttpTask(() => client.SendAsync(requestMessage));
                         if (!response.Headers.Contains("WWW-Authenticate"))
                         {
-                            Console.WriteLine("[X] AuthWithoutChannelBinding: did not receive an NTLM message in HTTP response.");
                             return false;
                         }
 
                         ntlmMessage = response.Headers.GetValues("WWW-Authenticate").First();
                     }
-                    catch (Exception e)
+                    catch (Exception)
                     {
-                        Console.WriteLine("[X] AuthWithoutChannelBinding HTTP request for URL '" + url + "' failed with error: " + e.Message);
                         return false;
                     }
 
@@ -332,9 +328,8 @@ namespace CertifyPowerShell
                         var response = SynchronizeHttpTask(() => client.SendAsync(requestMessage));
                         return response.StatusCode == HttpStatusCode.OK;
                     }
-                    catch (Exception e)
+                    catch (Exception)
                     {
-                        Console.WriteLine("[X] AuthWithoutChannelBinding HTTP request for URL '" + url + "' failed with error: " + e.Message);
                         return false;
                     }
                 }
@@ -358,7 +353,6 @@ namespace CertifyPowerShell
                 int res = InitializeSecurityContext(credHandle, IntPtr.Zero, WindowsIdentity.GetCurrent().Name, 0x00000800, 0, 0x10, IntPtr.Zero, 0, out clientContext, out clientToken, out contextAttributes, out clientLifeTime);
                 if (res != 0x00090312)
                 {
-                    Console.WriteLine("[X] HttpInitializeSecurityContext: failed with result = 0x" + res.ToString("x") + ".");
                     return null;
                 }
             }
@@ -368,7 +362,6 @@ namespace CertifyPowerShell
                 int res = InitializeSecurityContext(credHandle, clientContext, WindowsIdentity.GetCurrent().Name, 0x00000800, 0, 0x10, serverToken, 0, out clientContext, out clientToken, out contextAttributes, out clientLifeTime);
                 if (res != 0x00000000)
                 {
-                    Console.WriteLine("[X] HttpInitializeSecurityContext: failed with result = 0x" + res.ToString("x") + ".");
                     return null;
                 }
             }
@@ -1394,7 +1387,14 @@ function Write-EnterpriseCaInfo {
         else {
             Write-Host '    Enrollment Agent Restrictions :'
             foreach ($ace in $CA.EnrollmentAgentSecurity.DiscretionaryAcl) {
-                $entry = ConvertTo-EnrollmentAgentRestriction -Ace $ace
+                try {
+                    $entry = ConvertTo-EnrollmentAgentRestriction -Ace $ace
+                }
+                catch {
+                    Write-Host "      [!] Unable to parse enrollment agent restriction ACE: $($_.Exception.Message)"
+                    continue
+                }
+
                 Write-Host "      $(Get-UserSidString -Sid $entry.Agent)"
                 Write-Host "        Template : $($entry.Template)"
                 Write-Host '        Targets  :'
@@ -1413,19 +1413,27 @@ function ConvertTo-EnrollmentAgentRestriction {
     param([System.Security.AccessControl.CommonAce]$Ace)
 
     $bytes = $Ace.GetOpaque()
+    if ($null -eq $bytes -or $bytes.Length -lt 4) {
+        throw 'Enrollment agent restriction ACE has no opaque payload.'
+    }
+
     $index = 0
     $sidCount = [BitConverter]::ToUInt32($bytes, $index)
     $index += 4
 
     $targets = New-Object System.Collections.Generic.List[string]
     for ($i = 0; $i -lt $sidCount; $i++) {
+        if ($index -ge $bytes.Length) {
+            throw 'Enrollment agent restriction ACE ended before all target SIDs were parsed.'
+        }
+
         $sid = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList ($bytes, $index)
         [void]$targets.Add($sid.ToString())
         $index += $sid.BinaryLength
     }
 
     $templateName = '<All>'
-    if ($index -lt $bytes.Length) {
+    if ($index -lt ($bytes.Length - 2)) {
         $templateName = [Text.Encoding]::Unicode.GetString($bytes, $index, ($bytes.Length - $index - 2)).Replace("`0", '')
     }
 

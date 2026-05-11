@@ -606,9 +606,21 @@ function Get-NtAuthCertificates {
 
     $ldapPath = Join-LdapPath -Server $Server -DistinguishedName "CN=NTAuthCertificates,CN=Public Key Services,CN=Services,$ConfigurationPath"
     $results = Search-LdapObjects -LdapPath $ldapPath -Filter '(objectClass=certificationAuthority)' -Properties @('name', 'distinguishedName', 'objectGuid', 'caCertificate', 'nTSecurityDescriptor')
-    $items = @($results)
+    $items = New-Object System.Collections.Generic.List[object]
+    foreach ($result in $results) {
+        [void]$items.Add($result)
+    }
 
-    if ($items.Count -ne 1) {
+    if ($items.Count -eq 0) {
+        return [pscustomobject]@{
+            DistinguishedName  = $null
+            Name               = 'NTAuthCertificates'
+            Certificates       = @()
+            SecurityDescriptor = $null
+        }
+    }
+
+    if ($items.Count -gt 1) {
         throw 'More than one NTAuthCertificate object found'
     }
 
@@ -679,19 +691,27 @@ function ConvertTo-EnrollmentAgentRestriction {
     param([System.Security.AccessControl.CommonAce]$Ace)
 
     $bytes = $Ace.GetOpaque()
+    if ($null -eq $bytes -or $bytes.Length -lt 4) {
+        throw 'Enrollment agent restriction ACE has no opaque payload.'
+    }
+
     $index = 0
     $sidCount = [BitConverter]::ToUInt32($bytes, $index)
     $index += 4
 
     $targets = New-Object System.Collections.Generic.List[string]
     for ($i = 0; $i -lt $sidCount; $i++) {
+        if ($index -ge $bytes.Length) {
+            throw 'Enrollment agent restriction ACE ended before all target SIDs were parsed.'
+        }
+
         $sid = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList ($bytes, $index)
         [void]$targets.Add($sid.ToString())
         $index += $sid.BinaryLength
     }
 
     $templateName = '<All>'
-    if ($index -lt $bytes.Length) {
+    if ($index -lt ($bytes.Length - 2)) {
         $templateName = [Text.Encoding]::Unicode.GetString($bytes, $index, ($bytes.Length - $index - 2)).Replace("`0", '')
     }
 
@@ -777,7 +797,14 @@ function Write-EnterpriseCaInfo {
         else {
             Write-Host '    Enrollment Agent Restrictions :'
             foreach ($ace in $CA.EnrollmentAgentSecurity.DiscretionaryAcl) {
-                $entry = ConvertTo-EnrollmentAgentRestriction -Ace $ace
+                try {
+                    $entry = ConvertTo-EnrollmentAgentRestriction -Ace $ace
+                }
+                catch {
+                    Write-Host "      [!] Unable to parse enrollment agent restriction ACE: $($_.Exception.Message)"
+                    continue
+                }
+
                 Write-Host "      $(Get-UserSidString -Sid $entry.Agent)"
                 Write-Host "        Template : $($entry.Template)"
                 Write-Host '        Targets  :'
