@@ -110,7 +110,37 @@ function Invoke-SharpHoundDCOnly {
             return 0
         }
 
+        if ($Value -is [System.Collections.ICollection] -and -not ($Value -is [String])) {
+            return $Value.Count
+        }
+
         return @($Value).Count
+    }
+
+    function New-CollectorList {
+        return New-Object System.Collections.ArrayList
+    }
+
+    function Add-CollectorItem {
+        param(
+            [System.Collections.ArrayList]$Collection,
+            $Item
+        )
+
+        if ($null -ne $Item) {
+            [void]$Collection.Add($Item)
+        }
+    }
+
+    function Add-CollectorItems {
+        param(
+            [System.Collections.ArrayList]$Collection,
+            $Items
+        )
+
+        foreach ($item in @($Items)) {
+            Add-CollectorItem -Collection $Collection -Item $item
+        }
     }
 
     function Write-CollectionSummary {
@@ -501,7 +531,32 @@ function Invoke-SharpHoundDCOnly {
 
         $timer.Stop()
         Write-Stage -Name 'LDAP' -Message "Completed partitioned '$Name': $(@($allResults).Count) total result(s) in $([Math]::Round($timer.Elapsed.TotalSeconds, 2))s"
-        return @($allResults)
+        return $allResults.ToArray()
+    }
+
+    function Get-LdapQueryWorkItems {
+        param(
+            [String]$Name,
+            [String]$Filter
+        )
+
+        if ($DisableLdapPartitioning) {
+            return @([PSCustomObject][Ordered]@{
+                Name = $Name
+                Filter = $Filter
+            })
+        }
+
+        $workItems = New-Object System.Collections.ArrayList
+        for ($i = 0; $i -lt 256; $i++) {
+            $hex = $i.ToString('x2')
+            [void]$workItems.Add([PSCustomObject][Ordered]@{
+                Name = "$Name partition $hex"
+                Filter = "(&${Filter}(objectGUID=\$hex*))"
+            })
+        }
+
+        return $workItems.ToArray()
     }
 
     function Get-ObjectClasses {
@@ -885,6 +940,35 @@ function Invoke-SharpHoundDCOnly {
         )
     }
 
+    function Add-SearchResultToBuckets {
+        param(
+            [System.DirectoryServices.SearchResult]$Result,
+            [String]$DomainName,
+            [String]$DomainSid
+        )
+
+        $item = Convert-SearchResult -Result $Result -DomainName $DomainName -DomainSid $DomainSid -IncludeAces:(-not $NoACL)
+        if (-not $NoACL) {
+            Add-CollectorItems -Collection $acls -Items $item.Aces
+        }
+
+        switch ($item.ObjectType) {
+            'User' { Add-CollectorItem -Collection $users -Item $item }
+            'Computer' { Add-CollectorItem -Collection $computers -Item $item }
+            'Group' { Add-CollectorItem -Collection $groups -Item $item }
+            'OU' { Add-CollectorItem -Collection $ous -Item $item }
+            'GPO' { Add-CollectorItem -Collection $gpos -Item $item }
+            default {
+                $classes = Get-ObjectClasses -Result $Result
+                if ($classes -contains 'trusteddomain') {
+                    Add-CollectorItem -Collection $trusts -Item $item
+                } else {
+                    Add-CollectorItem -Collection $containers -Item $item
+                }
+            }
+        }
+    }
+
     $aclStatus = if ($NoACL) { 'disabled' } else { 'enabled' }
     $ldapTransport = if ($SecureLDAP) { 'LDAPS' } else { 'LDAP' }
     $partitionStatus = if ($DisableLdapPartitioning) { 'disabled' } else { 'enabled' }
@@ -960,28 +1044,28 @@ function Invoke-SharpHoundDCOnly {
         'msPKI-RA-Application-Policies', 'nTSecurityDescriptor'
     )
 
-    $users = @()
-    $computers = @()
-    $groups = @()
-    $domains = @()
-    $ous = @()
-    $gpos = @()
-    $containers = @()
-    $trusts = @()
-    $acls = @()
-    $certServices = @()
+    $users = New-CollectorList
+    $computers = New-CollectorList
+    $groups = New-CollectorList
+    $domains = New-CollectorList
+    $ous = New-CollectorList
+    $gpos = New-CollectorList
+    $containers = New-CollectorList
+    $trusts = New-CollectorList
+    $acls = New-CollectorList
+    $certServices = New-CollectorList
 
     foreach ($target in $domainTargets) {
         Write-Stage -Name 'Domain' -Message "Starting collection for $($target.Name) from $($target.NamingContext)"
-        $beforeUsers = @($users).Count
-        $beforeComputers = @($computers).Count
-        $beforeGroups = @($groups).Count
-        $beforeDomains = @($domains).Count
-        $beforeOus = @($ous).Count
-        $beforeGpos = @($gpos).Count
-        $beforeContainers = @($containers).Count
-        $beforeTrusts = @($trusts).Count
-        $beforeAcls = @($acls).Count
+        $beforeUsers = Get-CollectionCount -Value $users
+        $beforeComputers = Get-CollectionCount -Value $computers
+        $beforeGroups = Get-CollectionCount -Value $groups
+        $beforeDomains = Get-CollectionCount -Value $domains
+        $beforeOus = Get-CollectionCount -Value $ous
+        $beforeGpos = Get-CollectionCount -Value $gpos
+        $beforeContainers = Get-CollectionCount -Value $containers
+        $beforeTrusts = Get-CollectionCount -Value $trusts
+        $beforeAcls = Get-CollectionCount -Value $acls
 
         $domainInfo = Get-DomainInfo -Server $DomainController -DefaultNamingContext $target.NamingContext
         $domainName = if ($domainInfo['Name']) { [String]$domainInfo['Name'] } else { [String]$target.Name }
@@ -991,64 +1075,54 @@ function Invoke-SharpHoundDCOnly {
             Write-Stage -Name 'Domain' -Message "Processing domain object for $domainName"
             $domainObject = Convert-SearchResult -Result $domainInfo['Result'] -DomainName $domainName -DomainSid $domainSid -IncludeAces:(-not $NoACL)
             (Get-CollectorProperties -Item $domainObject)['collected'] = $true
-            $domains += $domainObject
+            Add-CollectorItem -Collection $domains -Item $domainObject
             if (-not $NoACL) {
-                $acls += @($domainObject.Aces)
+                Add-CollectorItems -Collection $acls -Items $domainObject.Aces
             }
         }
 
         foreach ($query in (Get-DefaultNamingContextQueries)) {
-            $results = Invoke-PartitionedLdapQuery -Server $DomainController -SearchBase $target.NamingContext -Filter $query.Filter -Properties $defaultProperties -IncludeSecurityDescriptor:(-not $NoACL) -Name $query.Name
+            $queryTotal = 0
+            $workItems = Get-LdapQueryWorkItems -Name $query.Name -Filter $query.Filter
+            if (-not $DisableLdapPartitioning) {
+                Write-Stage -Name 'LDAP' -Message "Processing '$($query.Name)' as $(@($workItems).Count) objectGUID partition(s)"
+            }
 
-            Write-Stage -Name 'Process' -Message "Classifying $(@($results).Count) result(s) from '$($query.Name)' for $domainName"
-            foreach ($result in $results) {
-                $item = Convert-SearchResult -Result $result -DomainName $domainName -DomainSid $domainSid -IncludeAces:(-not $NoACL)
-                if (-not $NoACL) {
-                    $acls += @($item.Aces)
-                }
+            foreach ($workItem in $workItems) {
+                $results = Invoke-LdapQuery -Server $DomainController -SearchBase $target.NamingContext -Filter $workItem.Filter -Properties $defaultProperties -IncludeSecurityDescriptor:(-not $NoACL) -Name $workItem.Name
+                $queryTotal += Get-CollectionCount -Value $results
 
-                switch ($item.ObjectType) {
-                    'User' { $users += $item }
-                    'Computer' { $computers += $item }
-                    'Group' { $groups += $item }
-                    'OU' { $ous += $item }
-                    'GPO' { $gpos += $item }
-                    default {
-                        $classes = Get-ObjectClasses -Result $result
-                        if ($classes -contains 'trusteddomain') {
-                            $trusts += $item
-                        } else {
-                            $containers += $item
-                        }
-                    }
+                Write-Stage -Name 'Process' -Message "Classifying $(Get-CollectionCount -Value $results) result(s) from '$($workItem.Name)' for $domainName"
+                foreach ($result in $results) {
+                    Add-SearchResultToBuckets -Result $result -DomainName $domainName -DomainSid $domainSid
                 }
             }
-            Write-Stage -Name 'Process' -Message "Finished '$($query.Name)' for $domainName"
+            Write-Stage -Name 'Process' -Message "Finished '$($query.Name)' for $domainName after classifying $queryTotal result(s)"
         }
 
-        $gpoHints = Get-GPOLocalGroupHints -Gpos $gpos -DomainName $domainName
-        if (@($gpoHints).Count -gt 0) {
-            $containers += $gpoHints
+        $gpoHints = Get-GPOLocalGroupHints -Gpos $gpos.ToArray() -DomainName $domainName
+        if ((Get-CollectionCount -Value $gpoHints) -gt 0) {
+            Add-CollectorItems -Collection $containers -Items $gpoHints
         }
 
         Write-Stage -Name 'Domain' -Message ("Completed {0}: +{1} users, +{2} computers, +{3} groups, +{4} domains, +{5} OUs, +{6} GPOs, +{7} containers, +{8} trusts, +{9} ACEs" -f
             $domainName,
-            (@($users).Count - $beforeUsers),
-            (@($computers).Count - $beforeComputers),
-            (@($groups).Count - $beforeGroups),
-            (@($domains).Count - $beforeDomains),
-            (@($ous).Count - $beforeOus),
-            (@($gpos).Count - $beforeGpos),
-            (@($containers).Count - $beforeContainers),
-            (@($trusts).Count - $beforeTrusts),
-            (@($acls).Count - $beforeAcls))
+            ((Get-CollectionCount -Value $users) - $beforeUsers),
+            ((Get-CollectionCount -Value $computers) - $beforeComputers),
+            ((Get-CollectionCount -Value $groups) - $beforeGroups),
+            ((Get-CollectionCount -Value $domains) - $beforeDomains),
+            ((Get-CollectionCount -Value $ous) - $beforeOus),
+            ((Get-CollectionCount -Value $gpos) - $beforeGpos),
+            ((Get-CollectionCount -Value $containers) - $beforeContainers),
+            ((Get-CollectionCount -Value $trusts) - $beforeTrusts),
+            ((Get-CollectionCount -Value $acls) - $beforeAcls))
     }
 
     if (-not [String]::IsNullOrWhiteSpace($configNC)) {
         Write-Stage -Name 'ConfigNC' -Message "Starting configuration naming context collection from $configNC"
-        $beforeConfigContainers = @($containers).Count
-        $beforeConfigAcls = @($acls).Count
-        $beforeCertServices = @($certServices).Count
+        $beforeConfigContainers = Get-CollectionCount -Value $containers
+        $beforeConfigAcls = Get-CollectionCount -Value $acls
+        $beforeCertServices = Get-CollectionCount -Value $certServices
 
         $configFilter = '(|(objectClass=certificationAuthority)(objectClass=pKIEnrollmentService)(objectClass=pKICertificateTemplate)(objectClass=pKIEnterpriseOid)(objectClass=pKIView)(objectClass=cRLDistributionPoint)(objectClass=container))'
         $configResults = Invoke-LdapQuery -Server $DomainController -SearchBase $configNC -Filter $configFilter -Properties $configProperties -IncludeSecurityDescriptor:(-not $NoACL) -Name 'DCOnly configuration naming context'
@@ -1058,7 +1132,7 @@ function Invoke-SharpHoundDCOnly {
         foreach ($result in $configResults) {
             $item = Convert-SearchResult -Result $result -DomainName $configDomain -DomainSid 'CONFIGURATION' -IncludeAces:(-not $NoACL)
             if (-not $NoACL) {
-                $acls += @($item.Aces)
+                Add-CollectorItems -Collection $acls -Items $item.Aces
             }
 
             $classes = Get-ObjectClasses -Result $result
@@ -1066,16 +1140,16 @@ function Invoke-SharpHoundDCOnly {
                 ($classes -contains 'pkienrollmentservice') -or
                 ($classes -contains 'pkicertificatetemplate') -or
                 ($classes -contains 'pkienterpriseoid')) {
-                $certServices += $item
+                Add-CollectorItem -Collection $certServices -Item $item
             } else {
-                $containers += $item
+                Add-CollectorItem -Collection $containers -Item $item
             }
         }
 
         Write-Stage -Name 'ConfigNC' -Message ("Completed configuration naming context: +{0} ADCS objects, +{1} containers, +{2} ACEs" -f
-            (@($certServices).Count - $beforeCertServices),
-            (@($containers).Count - $beforeConfigContainers),
-            (@($acls).Count - $beforeConfigAcls))
+            ((Get-CollectionCount -Value $certServices) - $beforeCertServices),
+            ((Get-CollectionCount -Value $containers) - $beforeConfigContainers),
+            ((Get-CollectionCount -Value $acls) - $beforeConfigAcls))
     } else {
         Write-Stage -Name 'ConfigNC' -Message 'Skipping configuration naming context collection because no configurationNamingContext was discovered'
     }
@@ -1093,20 +1167,20 @@ function Invoke-SharpHoundDCOnly {
     Write-CollectionSummary -Name 'ACEs' -Value $acls
 
     Write-Stage -Name 'Output' -Message 'Starting JSON output stage'
-    $written = @()
-    $written += Write-DataFile -DataType 'users' -Data $users -Directory $OutputDirectory
-    $written += Write-DataFile -DataType 'computers' -Data $computers -Directory $OutputDirectory
-    $written += Write-DataFile -DataType 'groups' -Data $groups -Directory $OutputDirectory
-    $written += Write-DataFile -DataType 'domains' -Data $domains -Directory $OutputDirectory
-    $written += Write-DataFile -DataType 'ous' -Data $ous -Directory $OutputDirectory
-    $written += Write-DataFile -DataType 'gpos' -Data $gpos -Directory $OutputDirectory
-    $written += Write-DataFile -DataType 'containers' -Data $containers -Directory $OutputDirectory
-    $written += Write-DataFile -DataType 'trusts' -Data $trusts -Directory $OutputDirectory
-    $written += Write-DataFile -DataType 'certservices' -Data $certServices -Directory $OutputDirectory
+    $written = New-CollectorList
+    Add-CollectorItem -Collection $written -Item (Write-DataFile -DataType 'users' -Data $users.ToArray() -Directory $OutputDirectory)
+    Add-CollectorItem -Collection $written -Item (Write-DataFile -DataType 'computers' -Data $computers.ToArray() -Directory $OutputDirectory)
+    Add-CollectorItem -Collection $written -Item (Write-DataFile -DataType 'groups' -Data $groups.ToArray() -Directory $OutputDirectory)
+    Add-CollectorItem -Collection $written -Item (Write-DataFile -DataType 'domains' -Data $domains.ToArray() -Directory $OutputDirectory)
+    Add-CollectorItem -Collection $written -Item (Write-DataFile -DataType 'ous' -Data $ous.ToArray() -Directory $OutputDirectory)
+    Add-CollectorItem -Collection $written -Item (Write-DataFile -DataType 'gpos' -Data $gpos.ToArray() -Directory $OutputDirectory)
+    Add-CollectorItem -Collection $written -Item (Write-DataFile -DataType 'containers' -Data $containers.ToArray() -Directory $OutputDirectory)
+    Add-CollectorItem -Collection $written -Item (Write-DataFile -DataType 'trusts' -Data $trusts.ToArray() -Directory $OutputDirectory)
+    Add-CollectorItem -Collection $written -Item (Write-DataFile -DataType 'certservices' -Data $certServices.ToArray() -Directory $OutputDirectory)
     if (-not $NoACL) {
-        $written += Write-DataFile -DataType 'acls' -Data $acls -Directory $OutputDirectory
+        Add-CollectorItem -Collection $written -Item (Write-DataFile -DataType 'acls' -Data $acls.ToArray() -Directory $OutputDirectory)
     }
-    Write-Stage -Name 'Output' -Message "JSON output stage complete: $(@($written).Count) file(s) written"
+    Write-Stage -Name 'Output' -Message "JSON output stage complete: $(Get-CollectionCount -Value $written) file(s) written"
 
     if ($Zip) {
         if ([String]::IsNullOrWhiteSpace($ZipFilename)) {
@@ -1121,15 +1195,15 @@ function Invoke-SharpHoundDCOnly {
             Remove-Item -LiteralPath $ZipFilename -Force
         }
 
-        Write-Stage -Name 'Zip' -Message "Compressing $(@($written).Count) JSON file(s)"
-        Compress-Archive -Path $written -DestinationPath $ZipFilename -Force
+        Write-Stage -Name 'Zip' -Message "Compressing $(Get-CollectionCount -Value $written) JSON file(s)"
+        Compress-Archive -Path $written.ToArray() -DestinationPath $ZipFilename -Force
         Write-Stage -Name 'Zip' -Message "Wrote $ZipFilename"
     } else {
         Write-Stage -Name 'Zip' -Message 'Skipping zip stage because -Zip was not specified'
     }
 
-    Write-Stage -Name 'Complete' -Message "Wrote $(@($written).Count) JSON files to $OutputDirectory"
-    return $written
+    Write-Stage -Name 'Complete' -Message "Wrote $(Get-CollectionCount -Value $written) JSON files to $OutputDirectory"
+    return $written.ToArray()
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
