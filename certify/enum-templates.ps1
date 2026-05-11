@@ -461,14 +461,14 @@ function ConvertTo-UInt32FromSignedString {
         return [uint32]0
     }
 
-    [int]$signed = 0
-    if ([int]::TryParse([string]$Value, [ref]$signed)) {
-        return [BitConverter]::ToUInt32([BitConverter]::GetBytes($signed), 0)
-    }
-
     [uint32]$unsigned = 0
     if ([uint32]::TryParse([string]$Value, [ref]$unsigned)) {
         return $unsigned
+    }
+
+    [int]$signed = 0
+    if ([int]::TryParse([string]$Value, [ref]$signed)) {
+        return [BitConverter]::ToUInt32([BitConverter]::GetBytes($signed), 0)
     }
 
     return [uint32]0
@@ -477,9 +477,18 @@ function ConvertTo-UInt32FromSignedString {
 function ConvertTo-UInt32String {
     param($Value)
 
+    if ($null -eq $Value) {
+        return [uint32]0
+    }
+
     [uint32]$unsigned = 0
-    if ($null -ne $Value -and [uint32]::TryParse([string]$Value, [ref]$unsigned)) {
+    if ([uint32]::TryParse([string]$Value, [ref]$unsigned)) {
         return $unsigned
+    }
+
+    [int]$signed = 0
+    if ([int]::TryParse([string]$Value, [ref]$signed)) {
+        return [BitConverter]::ToUInt32([BitConverter]::GetBytes($signed), 0)
     }
 
     return [uint32]0
@@ -985,13 +994,23 @@ function Get-CertificateTemplates {
 }
 
 function Get-CertificateInfo {
-    param([byte[]]$Bytes)
+    param(
+        [byte[]]$Bytes,
+        [string]$DistinguishedName,
+        [int]$Index
+    )
 
     if ($null -eq $Bytes) {
         return $null
     }
 
-    return New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList @(,$Bytes)
+    try {
+        return New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList @(,$Bytes)
+    }
+    catch {
+        Write-Host "[!] Warning: Unable to parse cACertificate value #$Index for '$DistinguishedName': $($_.Exception.Message)"
+        return $null
+    }
 }
 
 function Get-EnterpriseCAs {
@@ -1013,9 +1032,11 @@ function Get-EnterpriseCAs {
         $name = [string](Get-SearchValue -SearchResult $result -Name 'name')
         $dnsHostName = [string](Get-SearchValue -SearchResult $result -Name 'dnshostname')
         $templates = Get-SearchValues -SearchResult $result -Name 'certificatetemplates'
+        $certificateIndex = 0
         $certificates = foreach ($certBytes in @($result.Properties['cacertificate'])) {
+            $certificateIndex++
             if ($null -ne $certBytes) {
-                Get-CertificateInfo -Bytes ([byte[]]$certBytes)
+                Get-CertificateInfo -Bytes ([byte[]]$certBytes) -DistinguishedName $dn -Index $certificateIndex
             }
         }
 
@@ -1087,7 +1108,7 @@ function Update-CaRuntimeInfo {
     )
 
     try {
-        $editFlags = [uint32](Get-RemoteRegistryValue -ComputerName $CA.DnsHostname -KeyName "SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\$($CA.Name)\PolicyModules\CertificateAuthority_MicrosoftDefault.Policy" -ValueName 'EditFlags')
+        $editFlags = ConvertTo-UInt32String (Get-RemoteRegistryValue -ComputerName $CA.DnsHostname -KeyName "SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\$($CA.Name)\PolicyModules\CertificateAuthority_MicrosoftDefault.Policy" -ValueName 'EditFlags')
         $CA.UserSpecifiedSan = Get-FlagState -Flags $editFlags -Flag $script:EditFlags.ATTRIBUTE_SUBJECTALTNAME2
     }
     catch {
@@ -1096,7 +1117,7 @@ function Update-CaRuntimeInfo {
     }
 
     try {
-        $interfaceFlags = [uint32](Get-RemoteRegistryValue -ComputerName $CA.DnsHostname -KeyName "SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\$($CA.Name)" -ValueName 'InterfaceFlags')
+        $interfaceFlags = ConvertTo-UInt32String (Get-RemoteRegistryValue -ComputerName $CA.DnsHostname -KeyName "SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\$($CA.Name)" -ValueName 'InterfaceFlags')
         $CA.RpcRequestEncryption = Get-FlagState -Flags $interfaceFlags -Flag $script:InterfaceFlags.ENFORCE_ENCRYPT_ICERTREQUEST
 
         $restrictions = New-Object System.Collections.Generic.List[string]

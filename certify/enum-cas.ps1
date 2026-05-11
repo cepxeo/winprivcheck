@@ -88,9 +88,18 @@ function ConvertTo-FlagString {
 function ConvertTo-UInt32 {
     param($Value)
 
+    if ($null -eq $Value) {
+        return [uint32]0
+    }
+
     [uint32]$result = 0
-    if ($null -ne $Value -and [uint32]::TryParse([string]$Value, [ref]$result)) {
+    if ([uint32]::TryParse([string]$Value, [ref]$result)) {
         return $result
+    }
+
+    [int]$signed = 0
+    if ([int]::TryParse([string]$Value, [ref]$signed)) {
+        return [BitConverter]::ToUInt32([BitConverter]::GetBytes($signed), 0)
     }
 
     return [uint32]0
@@ -223,9 +232,17 @@ function Get-Certificates {
         return $null
     }
 
+    $dn = [string](Get-SearchValue -SearchResult $SearchResult -Name 'distinguishedname')
+    $index = 0
     foreach ($raw in @($values)) {
+        $index++
         if ($null -ne $raw) {
-            New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList @(,[byte[]]$raw)
+            try {
+                New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList @(,[byte[]]$raw)
+            }
+            catch {
+                Write-Host "[!] Warning: Unable to parse cACertificate value #$index for '$dn': $($_.Exception.Message)"
+            }
         }
     }
 }
@@ -417,7 +434,7 @@ function Update-CaRuntimeInfo {
     )
 
     try {
-        $editFlags = [uint32](Get-RemoteRegistryValue -ComputerName $CA.DnsHostname -KeyName "SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\$($CA.Name)\PolicyModules\CertificateAuthority_MicrosoftDefault.Policy" -ValueName 'EditFlags')
+        $editFlags = ConvertTo-UInt32 (Get-RemoteRegistryValue -ComputerName $CA.DnsHostname -KeyName "SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\$($CA.Name)\PolicyModules\CertificateAuthority_MicrosoftDefault.Policy" -ValueName 'EditFlags')
         $CA.UserSpecifiedSan = Get-FlagState -Flags $editFlags -Flag $script:EditFlags.ATTRIBUTE_SUBJECTALTNAME2
     }
     catch {
@@ -426,7 +443,7 @@ function Update-CaRuntimeInfo {
     }
 
     try {
-        $interfaceFlags = [uint32](Get-RemoteRegistryValue -ComputerName $CA.DnsHostname -KeyName "SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\$($CA.Name)" -ValueName 'InterfaceFlags')
+        $interfaceFlags = ConvertTo-UInt32 (Get-RemoteRegistryValue -ComputerName $CA.DnsHostname -KeyName "SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\$($CA.Name)" -ValueName 'InterfaceFlags')
         $CA.RpcRequestEncryption = Get-FlagState -Flags $interfaceFlags -Flag $script:InterfaceFlags.ENFORCE_ENCRYPT_ICERTREQUEST
 
         $restrictions = New-Object System.Collections.Generic.List[string]
