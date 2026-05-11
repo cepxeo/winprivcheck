@@ -688,7 +688,7 @@ function Convert-CaRightsToString {
     param([uint32]$Rights)
 
     $names = foreach ($entry in $script:CaRights.GetEnumerator()) {
-        $flag = ConvertTo-UInt32 $entry.Key
+        $flag = ConvertTo-UInt32 -Value $entry.Key
         if (Test-Flag -Value $Rights -Flag $flag) {
             [string]$entry.Value
         }

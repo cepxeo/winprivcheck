@@ -825,6 +825,26 @@ function ConvertTo-SignedInt32 {
     return [BitConverter]::ToInt32([BitConverter]::GetBytes($Value), 0)
 }
 
+function ConvertTo-UInt32 {
+    param($Value)
+
+    if ($null -eq $Value) {
+        return [uint32]0
+    }
+
+    [uint32]$unsigned = 0
+    if ([uint32]::TryParse([string]$Value, [ref]$unsigned)) {
+        return $unsigned
+    }
+
+    [int]$signed = 0
+    if ([int]::TryParse([string]$Value, [ref]$signed)) {
+        return [BitConverter]::ToUInt32([BitConverter]::GetBytes($signed), 0)
+    }
+
+    return [uint32]0
+}
+
 function Send-CertificateRequest {
     param(
         [string]$CertificateAuthority,
@@ -842,7 +862,7 @@ function Send-CertificateRequest {
             Write-Host "[*] CA Response             : The certificate is still pending."
         }
         default {
-            $lastStatus = [uint32]$certRequest.GetLastStatus()
+            $lastStatus = ConvertTo-UInt32 -Value ($certRequest.GetLastStatus())
             Write-Host "[!] CA Response             : The submission failed: $($certRequest.GetDispositionMessage())"
 
             $exception = [Runtime.InteropServices.Marshal]::GetExceptionForHR((ConvertTo-SignedInt32 -Value $lastStatus))
@@ -894,26 +914,6 @@ function Receive-AndInstallCertificate {
     Write-Host "[*] Certificate installed!"
 
     return $certificateBase64
-}
-
-function Export-ConsoleOutput {
-    param(
-        [Parameter(Mandatory = $true)]
-        [scriptblock]$ScriptBlock,
-        [string]$Path
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        & $ScriptBlock
-        return
-    }
-
-    $dir = Split-Path -Path $Path -Parent
-    if (-not [string]::IsNullOrWhiteSpace($dir) -and -not (Test-Path -Path $dir)) {
-        New-Item -Path $dir -ItemType Directory -Force | Out-Null
-    }
-
-    & $ScriptBlock *> $Path
 }
 
 function Invoke-CertRequest {
@@ -1076,6 +1076,44 @@ function Invoke-CertRequest {
     }
 }
 
-Export-ConsoleOutput -Path $OutFile -ScriptBlock {
-    Invoke-CertRequest
+if ([string]::IsNullOrWhiteSpace($OutFile)) {
+    try {
+        Invoke-CertRequest
+    }
+    catch {
+        Write-Host "[X] Unhandled request error: $($_.Exception.Message)"
+        if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+            Write-Host $_.InvocationInfo.PositionMessage
+        }
+        if ($_.ScriptStackTrace) {
+            Write-Host $_.ScriptStackTrace
+        }
+    }
+}
+else {
+    $dir = Split-Path -Path $OutFile -Parent
+    if (-not [string]::IsNullOrWhiteSpace($dir) -and -not (Test-Path -Path $dir)) {
+        New-Item -Path $dir -ItemType Directory -Force | Out-Null
+    }
+
+    $transcriptStarted = $false
+    try {
+        Start-Transcript -Path $OutFile -Force | Out-Null
+        $transcriptStarted = $true
+        Invoke-CertRequest
+    }
+    catch {
+        Write-Host "[X] Unhandled request error: $($_.Exception.Message)"
+        if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+            Write-Host $_.InvocationInfo.PositionMessage
+        }
+        if ($_.ScriptStackTrace) {
+            Write-Host $_.ScriptStackTrace
+        }
+    }
+    finally {
+        if ($transcriptStarted) {
+            Stop-Transcript | Out-Null
+        }
+    }
 }
