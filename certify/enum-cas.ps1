@@ -572,7 +572,13 @@ function Get-EnterpriseCAs {
             Vulnerabilities          = [ordered]@{}
         }
 
-        Update-CaRuntimeInfo -CA $ca -UserSids $UserSids
+        try {
+            Update-CaRuntimeInfo -CA $ca -UserSids $UserSids
+        }
+        catch {
+            Write-Host "[!] Warning: Unable to complete runtime CA checks for '$($ca.DistinguishedName)': $($_.Exception.Message)"
+        }
+
         [void]$cas.Add($ca)
     }
 
@@ -661,14 +667,21 @@ function Write-CertificateInfo {
     Write-Host "    Cert Start Date               : $($Certificate.NotBefore)"
     Write-Host "    Cert End Date                 : $($Certificate.NotAfter)"
 
-    $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
-    [void]$chain.Build($Certificate)
-    $names = New-Object System.Collections.Generic.List[string]
-    foreach ($element in $chain.ChainElements) {
-        $names.Insert(0, $element.Certificate.SubjectName.Name.Replace(' ', ''))
-    }
+    try {
+        $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+        [void]$chain.Build($Certificate)
+        $names = New-Object System.Collections.Generic.List[string]
+        foreach ($element in $chain.ChainElements) {
+            if ($null -ne $element.Certificate -and $null -ne $element.Certificate.SubjectName) {
+                $names.Insert(0, $element.Certificate.SubjectName.Name.Replace(' ', ''))
+            }
+        }
 
-    Write-Host "    Cert Chain                    : $($names -join ' -> ')"
+        Write-Host "    Cert Chain                    : $($names -join ' -> ')"
+    }
+    catch {
+        Write-Host "    Cert Chain                    : <unavailable: $($_.Exception.Message)>"
+    }
 }
 
 function Convert-CaRightsToString {
@@ -845,26 +858,6 @@ function Write-CAWebServices {
     }
 }
 
-function Export-ConsoleOutput {
-    param(
-        [Parameter(Mandatory = $true)]
-        [scriptblock]$ScriptBlock,
-        [string]$Path
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        & $ScriptBlock
-        return
-    }
-
-    $dir = Split-Path -Path $Path -Parent
-    if (-not [string]::IsNullOrWhiteSpace($dir) -and -not (Test-Path -Path $dir)) {
-        New-Item -Path $dir -ItemType Directory -Force | Out-Null
-    }
-
-    & $ScriptBlock *> $Path
-}
-
 function Invoke-EnumCas {
     Write-Host '[*] Action: Find certificate authorities'
 
@@ -953,6 +946,44 @@ function Invoke-EnumCas {
     }
 }
 
-Export-ConsoleOutput -Path $OutFile -ScriptBlock {
-    Invoke-EnumCas
+if ([string]::IsNullOrWhiteSpace($OutFile)) {
+    try {
+        Invoke-EnumCas
+    }
+    catch {
+        Write-Host "[X] Unhandled enum-cas error: $($_.Exception.Message)"
+        if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+            Write-Host $_.InvocationInfo.PositionMessage
+        }
+        if ($_.ScriptStackTrace) {
+            Write-Host $_.ScriptStackTrace
+        }
+    }
+}
+else {
+    $dir = Split-Path -Path $OutFile -Parent
+    if (-not [string]::IsNullOrWhiteSpace($dir) -and -not (Test-Path -Path $dir)) {
+        New-Item -Path $dir -ItemType Directory -Force | Out-Null
+    }
+
+    $transcriptStarted = $false
+    try {
+        Start-Transcript -Path $OutFile -Force | Out-Null
+        $transcriptStarted = $true
+        Invoke-EnumCas
+    }
+    catch {
+        Write-Host "[X] Unhandled enum-cas error: $($_.Exception.Message)"
+        if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+            Write-Host $_.InvocationInfo.PositionMessage
+        }
+        if ($_.ScriptStackTrace) {
+            Write-Host $_.ScriptStackTrace
+        }
+    }
+    finally {
+        if ($transcriptStarted) {
+            Stop-Transcript | Out-Null
+        }
+    }
 }

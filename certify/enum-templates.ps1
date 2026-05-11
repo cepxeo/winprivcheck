@@ -114,7 +114,7 @@ $script:CaRights = [ordered]@{
 }
 
 function Initialize-EnumTemplatesHttpInterop {
-    if ('CertifyPowerShell.EnumTemplatesHttpUtil' -as [type]) {
+    if ('CertifyPowerShell.EnumTemplatesHttpUtilQuiet' -as [type]) {
         return
     }
 
@@ -129,7 +129,7 @@ using System.Threading.Tasks;
 
 namespace CertifyPowerShell
 {
-    public static class EnumTemplatesHttpUtil
+    public static class EnumTemplatesHttpUtilQuiet
     {
         struct SECURITY_INTEGER
         {
@@ -979,7 +979,15 @@ function Get-CertificateTemplates {
         }
 
         $templateObject.ManagerApproval = Test-Flag -Value $templateObject.EnrollmentFlag -Flag $script:EnrollmentFlags.PEND_ALL_REQUESTS
-        $templateObject.Vulnerabilities = Get-TemplateVulnerabilities -TemplateObject $templateObject -UserSids $UserSids
+
+        try {
+            $templateObject.Vulnerabilities = Get-TemplateVulnerabilities -TemplateObject $templateObject -UserSids $UserSids
+        }
+        catch {
+            Write-Host "[!] Warning: Unable to classify vulnerabilities for template '$($templateObject.DistinguishedName)': $($_.Exception.Message)"
+            $templateObject.Vulnerabilities = [ordered]@{}
+        }
+
         [void]$templates.Add($templateObject)
     }
 
@@ -1055,7 +1063,13 @@ function Get-EnterpriseCAs {
             Vulnerabilities         = [ordered]@{}
         }
 
-        Update-CaRuntimeInfo -CA $ca -UserSids $UserSids
+        try {
+            Update-CaRuntimeInfo -CA $ca -UserSids $UserSids
+        }
+        catch {
+            Write-Host "[!] Warning: Unable to complete runtime CA checks for '$($ca.DistinguishedName)': $($_.Exception.Message)"
+        }
+
         [void]$cas.Add($ca)
     }
 
@@ -1185,10 +1199,10 @@ function Update-CaRuntimeInfo {
         Initialize-EnumTemplatesHttpInterop
         $httpUrl = "http://$($CA.DnsHostname)/certsrv/"
         $httpsUrl = "https://$($CA.DnsHostname)/certsrv/"
-        if ([CertifyPowerShell.EnumTemplatesHttpUtil]::AuthWithChannelBinding($httpUrl) -and [CertifyPowerShell.EnumTemplatesHttpUtil]::AuthWithoutChannelBinding($httpUrl)) {
+        if ([CertifyPowerShell.EnumTemplatesHttpUtilQuiet]::AuthWithChannelBinding($httpUrl) -and [CertifyPowerShell.EnumTemplatesHttpUtilQuiet]::AuthWithoutChannelBinding($httpUrl)) {
             $vulnerabilities[8] = 'The CA supports HTTP web enrollment without channel binding.'
         }
-        elseif ([CertifyPowerShell.EnumTemplatesHttpUtil]::AuthWithChannelBinding($httpsUrl) -and [CertifyPowerShell.EnumTemplatesHttpUtil]::AuthWithoutChannelBinding($httpsUrl)) {
+        elseif ([CertifyPowerShell.EnumTemplatesHttpUtilQuiet]::AuthWithChannelBinding($httpsUrl) -and [CertifyPowerShell.EnumTemplatesHttpUtilQuiet]::AuthWithoutChannelBinding($httpsUrl)) {
             $vulnerabilities[8] = 'The CA supports HTTPS web enrollment without channel binding.'
         }
     }
@@ -1215,14 +1229,21 @@ function Write-CertificateInfo {
     Write-Host "    Cert Start Date               : $($Certificate.NotBefore)"
     Write-Host "    Cert End Date                 : $($Certificate.NotAfter)"
 
-    $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
-    [void]$chain.Build($Certificate)
-    $names = New-Object System.Collections.Generic.List[string]
-    foreach ($element in $chain.ChainElements) {
-        $names.Insert(0, $element.Certificate.SubjectName.Name.Replace(' ', ''))
-    }
+    try {
+        $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+        [void]$chain.Build($Certificate)
+        $names = New-Object System.Collections.Generic.List[string]
+        foreach ($element in $chain.ChainElements) {
+            if ($null -ne $element.Certificate -and $null -ne $element.Certificate.SubjectName) {
+                $names.Insert(0, $element.Certificate.SubjectName.Name.Replace(' ', ''))
+            }
+        }
 
-    Write-Host "    Cert Chain                    : $($names -join ' -> ')"
+        Write-Host "    Cert Chain                    : $($names -join ' -> ')"
+    }
+    catch {
+        Write-Host "    Cert Chain                    : <unavailable: $($_.Exception.Message)>"
+    }
 }
 
 function Convert-CaRightsToString {
@@ -1530,7 +1551,18 @@ function Export-ConsoleOutput {
     )
 
     if ([string]::IsNullOrWhiteSpace($Path)) {
-        & $ScriptBlock
+        try {
+            & $ScriptBlock
+        }
+        catch {
+            Write-Host "[X] Unhandled enum-templates error: $($_.Exception.Message)"
+            if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+                Write-Host $_.InvocationInfo.PositionMessage
+            }
+            if ($_.ScriptStackTrace) {
+                Write-Host $_.ScriptStackTrace
+            }
+        }
         return
     }
 
@@ -1539,7 +1571,18 @@ function Export-ConsoleOutput {
         New-Item -Path $dir -ItemType Directory -Force | Out-Null
     }
 
-    & $ScriptBlock *> $Path
+    try {
+        & $ScriptBlock *> $Path
+    }
+    catch {
+        "[X] Unhandled enum-templates error: $($_.Exception.Message)" | Add-Content -Path $Path
+        if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+            $_.InvocationInfo.PositionMessage | Add-Content -Path $Path
+        }
+        if ($_.ScriptStackTrace) {
+            $_.ScriptStackTrace | Add-Content -Path $Path
+        }
+    }
 }
 
 function Invoke-EnumTemplates {
