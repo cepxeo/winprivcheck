@@ -71,7 +71,11 @@ function Invoke-SharpHoundDCOnly {
 
         [ValidateRange(1, 10000)]
         [Int]
-        $PageSize = 1000
+        $PageSize = 1000,
+
+        [ValidateRange(30, 3600)]
+        [Int]
+        $LdapTimeoutSeconds = 300
     )
 
     Set-StrictMode -Version 2.0
@@ -85,6 +89,34 @@ function Invoke-SharpHoundDCOnly {
     function Write-Info {
         param([String]$Message)
         Write-Host "[DCOnly] $Message"
+    }
+
+    function Write-Stage {
+        param(
+            [String]$Name,
+            [String]$Message
+        )
+
+        Write-Info "[$Name] $Message"
+    }
+
+    function Get-CollectionCount {
+        param($Value)
+
+        if ($null -eq $Value) {
+            return 0
+        }
+
+        return @($Value).Count
+    }
+
+    function Write-CollectionSummary {
+        param(
+            [String]$Name,
+            $Value
+        )
+
+        Write-Stage -Name 'Summary' -Message "$Name: $(Get-CollectionCount -Value $Value)"
     }
 
     function ConvertTo-CollectorJson {
@@ -176,6 +208,7 @@ function Invoke-SharpHoundDCOnly {
         param([String]$Server)
 
         $path = New-LdapPath -Server $Server -NamingContext 'RootDSE' -Ssl:$SecureLDAP
+        Write-Stage -Name 'Connect' -Message "Reading RootDSE from $path"
         $entry = New-DirectoryEntry -Path $path -UseCredential
 
         $props = @{}
@@ -183,6 +216,7 @@ function Invoke-SharpHoundDCOnly {
             $props[$name] = Convert-LdapValue -Value $entry.Properties[$name]
         }
 
+        Write-Stage -Name 'Connect' -Message "RootDSE read complete; discovered $($props.Count) properties"
         return $props
     }
 
@@ -373,8 +407,8 @@ function Invoke-SharpHoundDCOnly {
         $searcher.PageSize = $PageSize
         $searcher.SearchScope = [System.DirectoryServices.SearchScope]::Subtree
         $searcher.ReferralChasing = [System.DirectoryServices.ReferralChasingOption]::All
-        $searcher.ClientTimeout = New-TimeSpan -Seconds 120
-        $searcher.ServerTimeLimit = New-TimeSpan -Seconds 120
+        $searcher.ClientTimeout = New-TimeSpan -Seconds $LdapTimeoutSeconds
+        $searcher.ServerTimeLimit = New-TimeSpan -Seconds $LdapTimeoutSeconds
 
         if ($IncludeSecurityDescriptor) {
             $searcher.SecurityMasks = [System.DirectoryServices.SecurityMasks]::Dacl -bor
@@ -406,13 +440,26 @@ function Invoke-SharpHoundDCOnly {
         }
 
         Write-Verbose "$Name filter: $effectiveFilter"
+        $serverLabel = if ([String]::IsNullOrWhiteSpace($Server)) { 'default DC' } else { $Server }
+        $aclLabel = if ($IncludeSecurityDescriptor) { 'with security descriptors' } else { 'without security descriptors' }
+        Write-Stage -Name 'LDAP' -Message "Starting '$Name' against $serverLabel / $SearchBase ($aclLabel)"
         $searcher = New-LdapSearcher -Server $Server -SearchBase $SearchBase -Filter $effectiveFilter -Properties $Properties -IncludeSecurityDescriptor:$IncludeSecurityDescriptor -Name $Name
 
+        $timer = [System.Diagnostics.Stopwatch]::StartNew()
+        $results = @()
         try {
-            return $searcher.FindAll()
+            $rawResults = $searcher.FindAll()
+            foreach ($result in $rawResults) {
+                $results += $result
+            }
+            $timer.Stop()
+            Write-Stage -Name 'LDAP' -Message "Completed '$Name': $(@($results).Count) result(s) in $([Math]::Round($timer.Elapsed.TotalSeconds, 2))s"
+            return $results
         } catch {
+            $timer.Stop()
             Write-Warning "$Name failed against ${SearchBase}: $($_.Exception.Message)"
-            return @()
+            Write-Stage -Name 'LDAP' -Message "Completed '$Name': returning $(@($results).Count) partial result(s) after failure in $([Math]::Round($timer.Elapsed.TotalSeconds, 2))s"
+            return $results
         }
     }
 
@@ -664,7 +711,9 @@ function Invoke-SharpHoundDCOnly {
             }
         }
 
+        Write-Stage -Name 'Output' -Message "Writing $DataType.json with $(@($Data).Count) object(s)"
         $payload | ConvertTo-CollectorJson | Set-Content -Path $path -Encoding UTF8
+        Write-Stage -Name 'Output' -Message "Finished $path"
         return $path
     }
 
@@ -674,10 +723,12 @@ function Invoke-SharpHoundDCOnly {
             [String]$DefaultNamingContext
         )
 
+        Write-Stage -Name 'Domain' -Message "Resolving domain object for $DefaultNamingContext"
         $results = Invoke-LdapQuery -Server $Server -SearchBase $DefaultNamingContext -Filter '(objectClass=domainDNS)' -Properties @('distinguishedName', 'objectSid', 'name', 'dnsRoot', 'nTSecurityDescriptor', 'objectClass') -IncludeSecurityDescriptor:(-not $NoACL) -Name 'Domain object'
         foreach ($result in $results) {
             $domainSid = Get-ResultSid -Result $result
             $domainName = ConvertFrom-DistinguishedName -DistinguishedName (Get-ResultString -Result $result -Name 'distinguishedname')
+            Write-Stage -Name 'Domain' -Message "Resolved $domainName with SID $domainSid"
             return @{
                 Result = $result
                 Sid = $domainSid
@@ -685,6 +736,7 @@ function Invoke-SharpHoundDCOnly {
             }
         }
 
+        Write-Stage -Name 'Domain' -Message "Domain object was not returned; using naming-context derived values"
         return @{
             Result = $null
             Sid = 'UNKNOWN'
@@ -698,12 +750,14 @@ function Invoke-SharpHoundDCOnly {
             [String]$ConfigurationNamingContext
         )
 
+        Write-Stage -Name 'Forest' -Message "Enumerating forest domains from CN=Partitions,$ConfigurationNamingContext"
         $domains = @()
         $results = Invoke-LdapQuery -Server $Server -SearchBase "CN=Partitions,$ConfigurationNamingContext" -Filter '(&(objectClass=crossRef)(nCName=*)(dnsRoot=*))' -Properties @('dnsRoot', 'nCName') -Name 'Forest domains'
         foreach ($result in $results) {
             $dnsRoot = Get-ResultString -Result $result -Name 'dnsroot'
             $ncName = Get-ResultString -Result $result -Name 'ncname'
             if ($dnsRoot -and $ncName) {
+                Write-Stage -Name 'Forest' -Message "Discovered domain target $dnsRoot ($ncName)"
                 $domains += [PSCustomObject][Ordered]@{
                     Name = $dnsRoot
                     NamingContext = $ncName
@@ -711,6 +765,7 @@ function Invoke-SharpHoundDCOnly {
             }
         }
 
+        Write-Stage -Name 'Forest' -Message "Forest enumeration discovered $(@($domains).Count) domain target(s)"
         return $domains
     }
 
@@ -720,6 +775,7 @@ function Invoke-SharpHoundDCOnly {
             [String]$DomainName
         )
 
+        Write-Stage -Name 'GPO' -Message "Checking $(@($Gpos).Count) GPO object(s) for local group policy files"
         $items = @()
         foreach ($gpo in $Gpos) {
             $props = Get-CollectorProperties -Item $gpo
@@ -751,7 +807,60 @@ function Invoke-SharpHoundDCOnly {
             }
         }
 
+        Write-Stage -Name 'GPO' -Message "Discovered $(@($items).Count) GPO local group policy hint(s)"
         return $items
+    }
+
+    function Get-DefaultNamingContextQueries {
+        return @(
+            [PSCustomObject][Ordered]@{
+                Name = 'DCOnly users'
+                Filter = '(&(objectCategory=person)(objectClass=user))'
+            },
+            [PSCustomObject][Ordered]@{
+                Name = 'DCOnly computers'
+                Filter = '(objectClass=computer)'
+            },
+            [PSCustomObject][Ordered]@{
+                Name = 'DCOnly groups'
+                Filter = '(objectClass=group)'
+            },
+            [PSCustomObject][Ordered]@{
+                Name = 'DCOnly OUs'
+                Filter = '(objectClass=organizationalUnit)'
+            },
+            [PSCustomObject][Ordered]@{
+                Name = 'DCOnly GPOs'
+                Filter = '(objectClass=groupPolicyContainer)'
+            },
+            [PSCustomObject][Ordered]@{
+                Name = 'DCOnly trusted domains'
+                Filter = '(objectClass=trustedDomain)'
+            },
+            [PSCustomObject][Ordered]@{
+                Name = 'DCOnly containers'
+                Filter = '(&(objectClass=container)(!(objectClass=groupPolicyContainer))(!(objectClass=trustedDomain)))'
+            }
+        )
+    }
+
+    $aclStatus = if ($NoACL) { 'disabled' } else { 'enabled' }
+    $ldapTransport = if ($SecureLDAP) { 'LDAPS' } else { 'LDAP' }
+
+    Write-Stage -Name 'Start' -Message 'Starting PowerShell DCOnly collection'
+    Write-Stage -Name 'Start' -Message "Output directory: $OutputDirectory"
+    Write-Stage -Name 'Start' -Message "ACL collection: $aclStatus"
+    Write-Stage -Name 'Start' -Message "LDAP transport: $ldapTransport"
+    Write-Stage -Name 'Start' -Message "LDAP page size: $PageSize"
+    Write-Stage -Name 'Start' -Message "LDAP timeout: $LdapTimeoutSeconds second(s)"
+    if ($DomainController) {
+        Write-Stage -Name 'Start' -Message "Domain controller override: $DomainController"
+    }
+    if ($LdapUsername) {
+        Write-Stage -Name 'Start' -Message "Using explicit LDAP username: $LdapUsername"
+    }
+    if ($LdapFilter) {
+        Write-Stage -Name 'Start' -Message "Additional LDAP filter: $LdapFilter"
     }
 
     $root = Get-RootDse -Server $DomainController
@@ -763,17 +872,27 @@ function Invoke-SharpHoundDCOnly {
         throw 'Unable to determine defaultNamingContext. Specify -DomainController and/or -DistinguishedName.'
     }
 
+    Write-Stage -Name 'Discover' -Message "Default naming context: $defaultNC"
+    $configNcStatus = if ($configNC) { $configNC } else { 'not available' }
+    Write-Stage -Name 'Discover' -Message "Configuration naming context: $configNcStatus"
+    Write-Stage -Name 'Discover' -Message "Current domain: $currentDomain"
+
     $domainTargets = @([PSCustomObject][Ordered]@{
         Name = $currentDomain
         NamingContext = $defaultNC
     })
 
     if ($SearchForest -and -not [String]::IsNullOrWhiteSpace($configNC)) {
+        Write-Stage -Name 'Discover' -Message 'SearchForest enabled; building domain target list from configuration partition'
         $forestDomains = Get-ForestDomains -Server $DomainController -ConfigurationNamingContext $configNC
         if (@($forestDomains).Count -gt 0) {
             $domainTargets = $forestDomains
         }
+    } elseif ($SearchForest) {
+        Write-Stage -Name 'Discover' -Message 'SearchForest requested, but configuration naming context is not available'
     }
+
+    Write-Stage -Name 'Discover' -Message "Collection will target $(@($domainTargets).Count) domain naming context(s)"
 
     $defaultProperties = @(
         'objectClass', 'objectSid', 'objectGuid', 'distinguishedName', 'name', 'cn', 'sAMAccountName',
@@ -810,12 +929,23 @@ function Invoke-SharpHoundDCOnly {
     $certServices = @()
 
     foreach ($target in $domainTargets) {
-        Write-Info "Collecting $($target.Name) from $($target.NamingContext)"
+        Write-Stage -Name 'Domain' -Message "Starting collection for $($target.Name) from $($target.NamingContext)"
+        $beforeUsers = @($users).Count
+        $beforeComputers = @($computers).Count
+        $beforeGroups = @($groups).Count
+        $beforeDomains = @($domains).Count
+        $beforeOus = @($ous).Count
+        $beforeGpos = @($gpos).Count
+        $beforeContainers = @($containers).Count
+        $beforeTrusts = @($trusts).Count
+        $beforeAcls = @($acls).Count
+
         $domainInfo = Get-DomainInfo -Server $DomainController -DefaultNamingContext $target.NamingContext
         $domainName = if ($domainInfo['Name']) { [String]$domainInfo['Name'] } else { [String]$target.Name }
         $domainSid = if ($domainInfo['Sid']) { [String]$domainInfo['Sid'] } else { 'UNKNOWN' }
 
         if ($domainInfo['Result']) {
+            Write-Stage -Name 'Domain' -Message "Processing domain object for $domainName"
             $domainObject = Convert-SearchResult -Result $domainInfo['Result'] -DomainName $domainName -DomainSid $domainSid -IncludeAces:(-not $NoACL)
             (Get-CollectorProperties -Item $domainObject)['collected'] = $true
             $domains += $domainObject
@@ -824,44 +954,64 @@ function Invoke-SharpHoundDCOnly {
             }
         }
 
-        $mainFilter = '(|(&(objectCategory=person)(objectClass=user))(objectClass=computer)(objectClass=group)(objectClass=organizationalUnit)(objectClass=container)(objectClass=groupPolicyContainer)(objectClass=trustedDomain))'
-        $results = Invoke-LdapQuery -Server $DomainController -SearchBase $target.NamingContext -Filter $mainFilter -Properties $defaultProperties -IncludeSecurityDescriptor:(-not $NoACL) -Name 'DCOnly default naming context'
+        foreach ($query in (Get-DefaultNamingContextQueries)) {
+            $results = Invoke-LdapQuery -Server $DomainController -SearchBase $target.NamingContext -Filter $query.Filter -Properties $defaultProperties -IncludeSecurityDescriptor:(-not $NoACL) -Name $query.Name
 
-        foreach ($result in $results) {
-            $item = Convert-SearchResult -Result $result -DomainName $domainName -DomainSid $domainSid -IncludeAces:(-not $NoACL)
-            if (-not $NoACL) {
-                $acls += @($item.Aces)
-            }
+            Write-Stage -Name 'Process' -Message "Classifying $(@($results).Count) result(s) from '$($query.Name)' for $domainName"
+            foreach ($result in $results) {
+                $item = Convert-SearchResult -Result $result -DomainName $domainName -DomainSid $domainSid -IncludeAces:(-not $NoACL)
+                if (-not $NoACL) {
+                    $acls += @($item.Aces)
+                }
 
-            switch ($item.ObjectType) {
-                'User' { $users += $item }
-                'Computer' { $computers += $item }
-                'Group' { $groups += $item }
-                'OU' { $ous += $item }
-                'GPO' { $gpos += $item }
-                default {
-                    $classes = Get-ObjectClasses -Result $result
-                    if ($classes -contains 'trusteddomain') {
-                        $trusts += $item
-                    } else {
-                        $containers += $item
+                switch ($item.ObjectType) {
+                    'User' { $users += $item }
+                    'Computer' { $computers += $item }
+                    'Group' { $groups += $item }
+                    'OU' { $ous += $item }
+                    'GPO' { $gpos += $item }
+                    default {
+                        $classes = Get-ObjectClasses -Result $result
+                        if ($classes -contains 'trusteddomain') {
+                            $trusts += $item
+                        } else {
+                            $containers += $item
+                        }
                     }
                 }
             }
+            Write-Stage -Name 'Process' -Message "Finished '$($query.Name)' for $domainName"
         }
 
         $gpoHints = Get-GPOLocalGroupHints -Gpos $gpos -DomainName $domainName
         if (@($gpoHints).Count -gt 0) {
             $containers += $gpoHints
         }
+
+        Write-Stage -Name 'Domain' -Message ("Completed {0}: +{1} users, +{2} computers, +{3} groups, +{4} domains, +{5} OUs, +{6} GPOs, +{7} containers, +{8} trusts, +{9} ACEs" -f
+            $domainName,
+            (@($users).Count - $beforeUsers),
+            (@($computers).Count - $beforeComputers),
+            (@($groups).Count - $beforeGroups),
+            (@($domains).Count - $beforeDomains),
+            (@($ous).Count - $beforeOus),
+            (@($gpos).Count - $beforeGpos),
+            (@($containers).Count - $beforeContainers),
+            (@($trusts).Count - $beforeTrusts),
+            (@($acls).Count - $beforeAcls))
     }
 
     if (-not [String]::IsNullOrWhiteSpace($configNC)) {
-        Write-Info "Collecting configuration naming context $configNC"
+        Write-Stage -Name 'ConfigNC' -Message "Starting configuration naming context collection from $configNC"
+        $beforeConfigContainers = @($containers).Count
+        $beforeConfigAcls = @($acls).Count
+        $beforeCertServices = @($certServices).Count
+
         $configFilter = '(|(objectClass=certificationAuthority)(objectClass=pKIEnrollmentService)(objectClass=pKICertificateTemplate)(objectClass=pKIEnterpriseOid)(objectClass=pKIView)(objectClass=cRLDistributionPoint)(objectClass=container))'
         $configResults = Invoke-LdapQuery -Server $DomainController -SearchBase $configNC -Filter $configFilter -Properties $configProperties -IncludeSecurityDescriptor:(-not $NoACL) -Name 'DCOnly configuration naming context'
 
         $configDomain = if ($currentDomain) { $currentDomain } else { 'CONFIGURATION' }
+        Write-Stage -Name 'ConfigNC' -Message "Classifying $($configResults.Count) configuration naming context result(s)"
         foreach ($result in $configResults) {
             $item = Convert-SearchResult -Result $result -DomainName $configDomain -DomainSid 'CONFIGURATION' -IncludeAces:(-not $NoACL)
             if (-not $NoACL) {
@@ -878,8 +1028,28 @@ function Invoke-SharpHoundDCOnly {
                 $containers += $item
             }
         }
+
+        Write-Stage -Name 'ConfigNC' -Message ("Completed configuration naming context: +{0} ADCS objects, +{1} containers, +{2} ACEs" -f
+            (@($certServices).Count - $beforeCertServices),
+            (@($containers).Count - $beforeConfigContainers),
+            (@($acls).Count - $beforeConfigAcls))
+    } else {
+        Write-Stage -Name 'ConfigNC' -Message 'Skipping configuration naming context collection because no configurationNamingContext was discovered'
     }
 
+    Write-Stage -Name 'Summary' -Message 'Collection object totals before writing output'
+    Write-CollectionSummary -Name 'Users' -Value $users
+    Write-CollectionSummary -Name 'Computers' -Value $computers
+    Write-CollectionSummary -Name 'Groups' -Value $groups
+    Write-CollectionSummary -Name 'Domains' -Value $domains
+    Write-CollectionSummary -Name 'OUs' -Value $ous
+    Write-CollectionSummary -Name 'GPOs' -Value $gpos
+    Write-CollectionSummary -Name 'Containers' -Value $containers
+    Write-CollectionSummary -Name 'Trusts' -Value $trusts
+    Write-CollectionSummary -Name 'ADCS objects' -Value $certServices
+    Write-CollectionSummary -Name 'ACEs' -Value $acls
+
+    Write-Stage -Name 'Output' -Message 'Starting JSON output stage'
     $written = @()
     $written += Write-DataFile -DataType 'users' -Data $users -Directory $OutputDirectory
     $written += Write-DataFile -DataType 'computers' -Data $computers -Directory $OutputDirectory
@@ -893,6 +1063,7 @@ function Invoke-SharpHoundDCOnly {
     if (-not $NoACL) {
         $written += Write-DataFile -DataType 'acls' -Data $acls -Directory $OutputDirectory
     }
+    Write-Stage -Name 'Output' -Message "JSON output stage complete: $(@($written).Count) file(s) written"
 
     if ($Zip) {
         if ([String]::IsNullOrWhiteSpace($ZipFilename)) {
@@ -901,15 +1072,20 @@ function Invoke-SharpHoundDCOnly {
             $ZipFilename = Join-Path $OutputDirectory $zipBase
         }
 
+        Write-Stage -Name 'Zip' -Message "Preparing archive $ZipFilename"
         if (Test-Path -LiteralPath $ZipFilename) {
+            Write-Stage -Name 'Zip' -Message "Removing existing archive $ZipFilename"
             Remove-Item -LiteralPath $ZipFilename -Force
         }
 
+        Write-Stage -Name 'Zip' -Message "Compressing $(@($written).Count) JSON file(s)"
         Compress-Archive -Path $written -DestinationPath $ZipFilename -Force
-        Write-Info "Wrote $ZipFilename"
+        Write-Stage -Name 'Zip' -Message "Wrote $ZipFilename"
+    } else {
+        Write-Stage -Name 'Zip' -Message 'Skipping zip stage because -Zip was not specified'
     }
 
-    Write-Info "Wrote $(@($written).Count) JSON files to $OutputDirectory"
+    Write-Stage -Name 'Complete' -Message "Wrote $(@($written).Count) JSON files to $OutputDirectory"
     return $written
 }
 

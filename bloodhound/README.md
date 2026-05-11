@@ -1,6 +1,6 @@
 # PowerShell DCOnly Collector
 
-`powershell/Invoke-SharpHoundDCOnly.ps1` is a self-contained PowerShell implementation of a SharpHound-style `DCOnly` collection path.
+`powershell/Invoke-DCOnly.ps1` is a self-contained PowerShell implementation of a SharpHound-style `DCOnly` collection path.
 
 It is intended for environments where you want LDAP-only collection without loading the compiled SharpHound .NET assembly. The script uses .NET `System.DirectoryServices` APIs directly and does not require the ActiveDirectory PowerShell module.
 
@@ -38,51 +38,53 @@ No SharpHound binary, SharpHound DLL, or ActiveDirectory module is required.
 Run against the current domain and write JSON files to the current directory:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1
+.\powershell\Invoke-DCOnly.ps1
 ```
 
 Write output to a specific directory:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -OutputDirectory .\output
+.\powershell\Invoke-DCOnly.ps1 -OutputDirectory .\output
 ```
 
 Create a zip archive after collection:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -OutputDirectory .\output -Zip
+.\powershell\Invoke-DCOnly.ps1 -OutputDirectory .\output -Zip
 ```
 
 Use pretty-printed JSON:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -OutputDirectory .\output -PrettyPrint
+.\powershell\Invoke-DCOnly.ps1 -OutputDirectory .\output -PrettyPrint
 ```
+
+The script prints progress messages for every major stage, including RootDSE discovery, forest/domain target selection, each LDAP query, object classification, GPO policy hint checks, configuration naming context collection, JSON writing, and zip creation. Use `-Verbose` to also print the effective LDAP filters.
 
 ## Domain Targeting
 
 Specify a domain controller:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -DomainController dc01.corp.example.com
+.\powershell\Invoke-DCOnly.ps1 -DomainController dc01.corp.example.com
 ```
 
 Specify a domain and domain controller:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -Domain corp.example.com -DomainController dc01.corp.example.com
+.\powershell\Invoke-DCOnly.ps1 -Domain corp.example.com -DomainController dc01.corp.example.com
 ```
 
 Start collection from a specific distinguished name:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -DistinguishedName "DC=corp,DC=example,DC=com"
+.\powershell\Invoke-DCOnly.ps1 -DistinguishedName "DC=corp,DC=example,DC=com"
 ```
 
 Search all domains listed in the forest partitions container:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -SearchForest
+.\powershell\Invoke-DCOnly.ps1 -SearchForest
 ```
 
 ## Authentication And LDAP Options
@@ -90,19 +92,19 @@ Search all domains listed in the forest partitions container:
 Use explicit LDAP credentials:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -LdapUsername "CORP\collector" -LdapPassword "Password123!"
+.\powershell\Invoke-DCOnly.ps1 -LdapUsername "CORP\collector" -LdapPassword "Password123!"
 ```
 
 Use LDAPS:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -DomainController dc01.corp.example.com -SecureLDAP
+.\powershell\Invoke-DCOnly.ps1 -DomainController dc01.corp.example.com -SecureLDAP
 ```
 
 Use a custom LDAP or LDAPS port:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -DomainController dc01.corp.example.com -SecureLDAP -LdapPort 636
+.\powershell\Invoke-DCOnly.ps1 -DomainController dc01.corp.example.com -SecureLDAP -LdapPort 636
 ```
 
 ## Filtering
@@ -110,19 +112,19 @@ Use a custom LDAP or LDAPS port:
 Append an LDAP filter to the generated collection filter:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -LdapFilter "(adminCount=1)"
+.\powershell\Invoke-DCOnly.ps1 -LdapFilter "(adminCount=1)"
 ```
 
 Collect all LDAP properties requested by the directory service:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -CollectAllProperties
+.\powershell\Invoke-DCOnly.ps1 -CollectAllProperties
 ```
 
 Skip ACL/security descriptor collection:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -NoACL
+.\powershell\Invoke-DCOnly.ps1 -NoACL
 ```
 
 ## Output
@@ -143,13 +145,13 @@ The script writes BloodHound-style JSON wrapper files with `data` and `meta` sec
 Use `-OutputPrefix` to prefix generated file names:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -OutputPrefix corp_dc_only
+.\powershell\Invoke-DCOnly.ps1 -OutputPrefix corp_dc_only
 ```
 
 Use a custom zip file path:
 
 ```powershell
-.\powershell\Invoke-SharpHoundDCOnly.ps1 -Zip -ZipFilename .\output\corp_dc_only.zip
+.\powershell\Invoke-DCOnly.ps1 -Zip -ZipFilename .\output\corp_dc_only.zip
 ```
 
 ## Notes
