@@ -1,3 +1,25 @@
+## Read LAPS pass
+
+.\Get-LapsPasswordForComputer.ps1 -ComputerName WS01
+.\Get-LapsPasswordForComputer.ps1 -ComputerName WS01 -DomainController dc01.contoso.local
+
+$Cred = Get-Credential
+.\Get-LapsPasswordForComputer.ps1 -ComputerName WS01 -Credential $Cred
+
+## Change domain user pass
+
+.\Set-DomainUserPass.ps1 -Identity jsmith
+
+$Cred = Get-Credential
+.\Set-DomainUserPass.ps1 -Identity jsmith -Credential $Cred
+
+$Cred = Get-Credential
+.\Set-DomainUserPass.ps1 -Identity jsmith -DomainController dc01.contoso.local -Credential $Cred
+
+$NewPassword = Read-Host "New password" -AsSecureString
+.\Set-DomainUserPass.ps1 -Identity jsmith -NewPassword $NewPassword -Credential $Cred
+
+
 # PrivCheck Techniques
 
 This directory contains the split PrivCheck technique scripts. Each numbered
