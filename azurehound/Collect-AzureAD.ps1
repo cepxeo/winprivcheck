@@ -43,40 +43,63 @@ function Add-CollectionRecords {
 
 Assert-AzCliAvailable
 
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting Entra ID objects"
 $records = [System.Collections.Generic.List[object]]::new()
 
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting users"
 $users = Get-GraphCollection -Path "users" -Query @{ '$top' = 999 } -ContinueOnError:$ContinueOnError
 Add-CollectionRecords -Records $records -Kind "AZUser" -Items $users
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($users).Count) user(s)"
 
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting applications"
 $applications = Get-GraphCollection -Path "applications" -Query @{ '$top' = 99 } -ContinueOnError:$ContinueOnError
 Add-CollectionRecords -Records $records -Kind "AZApp" -Items $applications
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($applications).Count) application(s)"
 
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting devices"
 $devices = Get-GraphCollection -Path "devices" -Query @{ '$top' = 999 } -ContinueOnError:$ContinueOnError
 Add-CollectionRecords -Records $records -Kind "AZDevice" -Items $devices
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($devices).Count) device(s)"
 
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting groups"
 $groups = Get-GraphCollection -Path "groups" -Query @{ '$top' = 999 } -ContinueOnError:$ContinueOnError
 Add-CollectionRecords -Records $records -Kind "AZGroup" -Items $groups
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($groups).Count) group(s)"
 
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting service principals"
 $servicePrincipals = Get-GraphCollection -Path "servicePrincipals" -Query @{ '$top' = 999 } -ContinueOnError:$ContinueOnError
 Add-CollectionRecords -Records $records -Kind "AZServicePrincipal" -Items $servicePrincipals
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($servicePrincipals).Count) service principal(s)"
 
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting tenant organization"
 $tenants = Get-GraphCollection -Path "organization" -ContinueOnError:$ContinueOnError
 Add-CollectionRecords -Records $records -Kind "AZTenant" -Items $tenants
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($tenants).Count) tenant object(s)"
 
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting directory role definitions"
 $roles = Get-GraphCollection -Path "roleManagement/directory/roleDefinitions" -ContinueOnError:$ContinueOnError
 Add-CollectionRecords -Records $records -Kind "AZRole" -Items $roles
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($roles).Count) directory role definition(s)"
 
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting directory role assignments"
 $roleAssignments = Get-GraphCollection -Path "roleManagement/directory/roleAssignments" -Query @{ '$top' = 999 } -ContinueOnError:$ContinueOnError
 Add-CollectionRecords -Records $records -Kind "AZRoleAssignment" -Items $roleAssignments
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($roleAssignments).Count) directory role assignment(s)"
 
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting eligible role schedule instances"
 $eligibleRoles = Get-GraphCollection -Path "roleManagement/directory/roleEligibilityScheduleInstances" -ContinueOnError:$ContinueOnError
 Add-CollectionRecords -Records $records -Kind "AZRoleEligibilityScheduleInstance" -Items $eligibleRoles
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($eligibleRoles).Count) eligible role schedule instance(s)"
 
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting role management policy assignments"
 $policyAssignments = Get-GraphCollection -Path "policies/roleManagementPolicyAssignments" -ContinueOnError:$ContinueOnError
 Add-CollectionRecords -Records $records -Kind "AZRoleManagementPolicyAssignment" -Items $policyAssignments
+Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($policyAssignments).Count) role management policy assignment(s)"
 
 if (-not $SkipRelationships) {
+    Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting application owners and federated identity credentials"
     foreach ($app in $applications) {
+        Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting application relationships for $($app.displayName) [$($app.id)]"
         $owners = Get-GraphCollection -Path "applications/$($app.id)/owners" -Query @{ '$top' = 99 } -UseBeta -ContinueOnError:$ContinueOnError
         $ownerItems = foreach ($owner in $owners) {
             [pscustomobject]@{
@@ -98,7 +121,9 @@ if (-not $SkipRelationships) {
         }
     }
 
+    Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting group owners and members"
     foreach ($group in $groups) {
+        Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting group relationships for $($group.displayName) [$($group.id)]"
         $owners = Get-GraphCollection -Path "groups/$($group.id)/owners" -Query @{ '$top' = 999 } -ContinueOnError:$ContinueOnError
         $ownerItems = foreach ($owner in $owners) {
             [pscustomobject]@{
@@ -124,7 +149,9 @@ if (-not $SkipRelationships) {
         })))
     }
 
+    Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting service principal owners and app role assignments"
     foreach ($sp in $servicePrincipals) {
+        Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting service principal relationships for $($sp.displayName) [$($sp.id)]"
         $owners = Get-GraphCollection -Path "servicePrincipals/$($sp.id)/owners" -Query @{ '$top' = 999 } -ContinueOnError:$ContinueOnError
         $ownerItems = foreach ($owner in $owners) {
             [pscustomobject]@{
@@ -146,5 +173,9 @@ if (-not $SkipRelationships) {
         }
     }
 }
+else {
+    Write-AzureHoundStatus -Stage "AZAD" -Message "Skipping Entra ID relationship collection"
+}
 
+Write-AzureHoundStatus -Stage "AZAD" -Message "Finished Entra ID collection with $($records.Count) record(s)"
 Write-AzureHoundOutput -Records $records -OutputPath $OutputPath

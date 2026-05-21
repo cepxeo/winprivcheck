@@ -47,3 +47,10 @@ The output envelope matches AzureHound's file shape:
 ```
 
 Use `-ContinueOnError` when you expect partial permissions. Use `-SkipRelationships` for a faster object-only inventory.
+
+The scripts print timestamped status lines for CLI checks, collection phases,
+REST pages, record counts, temporary files, and output writes.
+
+If an `az rest` call fails with exit code 1, rerun with `-ContinueOnError`
+to collect everything your current token can read while warning on denied
+Graph or Azure Resource Manager endpoints.

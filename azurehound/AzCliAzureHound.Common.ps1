@@ -1,12 +1,39 @@
+function Write-AzureHoundStatus {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Message,
+
+        [string] $Stage = "INFO"
+    )
+
+    $timestamp = Get-Date -Format "HH:mm:ss"
+    Write-Host ("[{0}] [{1}] {2}" -f $timestamp, $Stage, $Message) -ForegroundColor Cyan
+}
+
 function Assert-AzCliAvailable {
+    Write-AzureHoundStatus -Stage "CHECK" -Message "Checking Azure CLI availability"
     if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
         throw "Azure CLI (az) was not found on PATH."
     }
 
-    $null = az account show --only-show-errors 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Azure CLI is not logged in. Run 'az login' before collecting data."
+    Write-AzureHoundStatus -Stage "CHECK" -Message "Checking active Azure CLI account"
+    $azAccountError = [System.IO.Path]::GetTempFileName()
+    try {
+        $null = az account show --only-show-errors 2>$azAccountError
+        $accountError = Get-Content -Path $azAccountError -Raw -ErrorAction SilentlyContinue
     }
+    finally {
+        Remove-Item -Path $azAccountError -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        $message = "Azure CLI is not logged in or cannot read the active account. Run 'az login' before collecting data."
+        if (-not [string]::IsNullOrWhiteSpace($accountError)) {
+            $message = "$message`naz account show: $($accountError.Trim())"
+        }
+        throw $message
+    }
+    Write-AzureHoundStatus -Stage "CHECK" -Message "Azure CLI account is available"
 }
 
 function ConvertTo-QueryString {
@@ -39,15 +66,35 @@ function Invoke-AzCliJson {
         [switch] $ContinueOnError
     )
 
+    $stderrPath = [System.IO.Path]::GetTempFileName()
     try {
-        $json = & $ScriptBlock
+        $json = & $ScriptBlock 2>$stderrPath
+        $stderr = Get-Content -Path $stderrPath -Raw -ErrorAction SilentlyContinue
+        $stdout = ($json | ForEach-Object { [string] $_ }) -join "`n"
         if ($LASTEXITCODE -ne 0) {
-            throw "az command failed with exit code $LASTEXITCODE"
+            $details = [System.Collections.Generic.List[string]]::new()
+            if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+                $details.Add($stderr.Trim())
+            }
+            if (-not [string]::IsNullOrWhiteSpace($stdout)) {
+                $details.Add($stdout.Trim())
+            }
+
+            $message = "$CommandName failed with exit code $LASTEXITCODE"
+            if ($details.Count -gt 0) {
+                $message = "$message`: $($details -join "`n")"
+            }
+            throw $message
         }
-        if ([string]::IsNullOrWhiteSpace($json)) {
+        if ([string]::IsNullOrWhiteSpace($stdout)) {
             return $null
         }
-        return $json | ConvertFrom-Json
+        try {
+            return $json | ConvertFrom-Json
+        }
+        catch {
+            throw "$CommandName returned invalid JSON: $($stdout.Trim())"
+        }
     }
     catch {
         if ($ContinueOnError) {
@@ -55,6 +102,9 @@ function Invoke-AzCliJson {
             return $null
         }
         throw
+    }
+    finally {
+        Remove-Item -Path $stderrPath -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -68,8 +118,10 @@ function Invoke-AzRestCollection {
 
     $items = [System.Collections.Generic.List[object]]::new()
     $next = $Uri
+    $page = 1
 
     while (-not [string]::IsNullOrWhiteSpace($next)) {
+        Write-AzureHoundStatus -Stage "REST" -Message "Requesting page $page`: $next"
         $response = Invoke-AzCliJson -CommandName "az rest $next" -ContinueOnError:$ContinueOnError -ScriptBlock {
             az rest --method get --uri $next --only-show-errors
         }
@@ -96,6 +148,9 @@ function Invoke-AzRestCollection {
         else {
             $next = $null
         }
+
+        Write-AzureHoundStatus -Stage "REST" -Message "Collected $($items.Count) item(s) so far"
+        $page++
     }
 
     return $items.ToArray()
@@ -246,13 +301,16 @@ function Write-AzureHoundOutput {
 
     $json = $document | ConvertTo-Json -Depth 100
     if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+        Write-AzureHoundStatus -Stage "OUTPUT" -Message "Writing $($items.Count) record(s) to stdout"
         $json
     }
     else {
         $parent = Split-Path -Parent $OutputPath
         if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path $parent)) {
+            Write-AzureHoundStatus -Stage "OUTPUT" -Message "Creating output directory $parent"
             New-Item -ItemType Directory -Path $parent -Force | Out-Null
         }
+        Write-AzureHoundStatus -Stage "OUTPUT" -Message "Writing $($items.Count) record(s) to $OutputPath"
         Set-Content -Path $OutputPath -Value $json -Encoding UTF8
     }
 }
