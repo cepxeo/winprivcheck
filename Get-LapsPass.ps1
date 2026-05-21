@@ -12,6 +12,8 @@ param(
 
     [pscredential] $Credential,
 
+    [pscredential] $DecryptionCredential,
+
     [switch] $LegacyOnly
 )
 
@@ -130,14 +132,23 @@ try {
 
         if ($DomainController) { $Params.DomainController = $DomainController }
         if ($Credential) { $Params.Credential = $Credential }
+        if ($DecryptionCredential) {
+            $Params.DecryptionCredential = $DecryptionCredential
+        }
+        elseif ($Credential) {
+            $Params.DecryptionCredential = $Credential
+        }
 
         $LapsPassword = Get-LapsADPassword @Params
         [pscustomobject] @{
             ComputerName = $LapsPassword.ComputerName
             Account      = $LapsPassword.Account
             Password     = $LapsPassword.Password
+            PasswordUpdateTime = $LapsPassword.PasswordUpdateTime
             Expiration   = $LapsPassword.ExpirationTimestamp
-            Source       = 'Windows LAPS'
+            Source       = $LapsPassword.Source
+            DecryptionStatus = $LapsPassword.DecryptionStatus
+            AuthorizedDecryptor = $LapsPassword.AuthorizedDecryptor
         }
 
         return

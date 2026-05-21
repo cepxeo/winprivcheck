@@ -1,10 +1,14 @@
 ## Read LAPS pass
 
-.\Get-LapsPasswordForComputer.ps1 -ComputerName WS01
-.\Get-LapsPasswordForComputer.ps1 -ComputerName WS01 -DomainController dc01.contoso.local
+.\Get-LapsPass.ps1 -ComputerName WS01
+.\Get-LapsPass.ps1 -ComputerName WS01 -DomainController dc01.contoso.local
 
 $Cred = Get-Credential
-.\Get-LapsPasswordForComputer.ps1 -ComputerName WS01 -Credential $Cred
+.\Get-LapsPass.ps1 -ComputerName WS01 -Credential $Cred
+
+$QueryCred = Get-Credential
+$DecryptCred = Get-Credential
+.\Get-LapsPass.ps1 -ComputerName WS01 -Credential $QueryCred -DecryptionCredential $DecryptCred
 
 ## Change domain user pass
 
@@ -164,4 +168,3 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 | `74-current-logged-on-users.ps1` | Logged-on users | Lists current interactive/logged-on user sessions. |
 | `75-remote-sessions.ps1` | Remote sessions | Lists remote desktop/session information where commands are available. |
 | `76-kerberos-tickets.ps1` | Kerberos tickets | Lists current Kerberos tickets. |
-
