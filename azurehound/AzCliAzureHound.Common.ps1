@@ -305,12 +305,24 @@ function Write-AzureHoundOutput {
         $json
     }
     else {
-        $parent = Split-Path -Parent $OutputPath
+        try {
+            $resolvedOutputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
+        }
+        catch {
+            $resolvedOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
+        }
+        $parent = Split-Path -Parent $resolvedOutputPath
         if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path $parent)) {
             Write-AzureHoundStatus -Stage "OUTPUT" -Message "Creating output directory $parent"
             New-Item -ItemType Directory -Path $parent -Force | Out-Null
         }
-        Write-AzureHoundStatus -Stage "OUTPUT" -Message "Writing $($items.Count) record(s) to $OutputPath"
-        Set-Content -Path $OutputPath -Value $json -Encoding UTF8
+        Write-AzureHoundStatus -Stage "OUTPUT" -Message "Writing $($items.Count) record(s) to $resolvedOutputPath"
+        Set-Content -LiteralPath $resolvedOutputPath -Value $json -Encoding UTF8
+
+        $writtenFile = Get-Item -LiteralPath $resolvedOutputPath -ErrorAction SilentlyContinue
+        if ($null -eq $writtenFile) {
+            throw "Failed to write AzureHound output to $resolvedOutputPath"
+        }
+        Write-AzureHoundStatus -Stage "OUTPUT" -Message "Saved output to $resolvedOutputPath ($($writtenFile.Length) bytes)"
     }
 }

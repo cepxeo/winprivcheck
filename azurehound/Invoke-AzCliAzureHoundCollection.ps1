@@ -14,6 +14,7 @@ param(
 . "$PSScriptRoot/AzCliAzureHound.Common.ps1"
 
 Write-AzureHoundStatus -Stage "START" -Message "Starting AzureHound Azure CLI collection with scope $Scope"
+Write-AzureHoundStatus -Stage "START" -Message "Requested output path: $OutputPath"
 Assert-AzCliAvailable
 
 $records = [System.Collections.Generic.List[object]]::new()
