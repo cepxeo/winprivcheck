@@ -46,7 +46,7 @@ The output envelope matches AzureHound's file shape:
 }
 ```
 
-Use `-ContinueOnError` when you expect partial permissions. Use `-SkipRelationships` or `-ObjectOnly` for a faster object-only inventory.
+Use `-ContinueOnError` when you expect partial permissions. Use `-SkipRelationships` or `-ObjectOnly` for a faster object-only inventory that avoids relationship, role assignment, and PIM policy endpoints.
 Use `-MaxPages` or `-MaxItems` to cap each paged request while testing or when a tenant is very large.
 
 The scripts print timestamped status lines for CLI checks, collection phases,

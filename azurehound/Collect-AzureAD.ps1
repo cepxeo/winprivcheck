@@ -90,22 +90,22 @@ $roles = Get-GraphCollection -Path "roleManagement/directory/roleDefinitions" -M
 Add-CollectionRecords -Records $records -Kind "AZRole" -Items $roles
 Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($roles).Count) directory role definition(s)"
 
-Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting directory role assignments"
-$roleAssignments = Get-GraphCollection -Path "roleManagement/directory/roleAssignments" -Query @{ '$top' = 999 } -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
-Add-CollectionRecords -Records $records -Kind "AZRoleAssignment" -Items $roleAssignments
-Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($roleAssignments).Count) directory role assignment(s)"
-
-Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting eligible role schedule instances"
-$eligibleRoles = Get-GraphCollection -Path "roleManagement/directory/roleEligibilityScheduleInstances" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
-Add-CollectionRecords -Records $records -Kind "AZRoleEligibilityScheduleInstance" -Items $eligibleRoles
-Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($eligibleRoles).Count) eligible role schedule instance(s)"
-
-Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting role management policy assignments"
-$policyAssignments = Get-GraphCollection -Path "policies/roleManagementPolicyAssignments" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
-Add-CollectionRecords -Records $records -Kind "AZRoleManagementPolicyAssignment" -Items $policyAssignments
-Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($policyAssignments).Count) role management policy assignment(s)"
-
 if (-not $SkipRelationships) {
+    Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting directory role assignments"
+    $roleAssignments = Get-GraphCollection -Path "roleManagement/directory/roleAssignments" -Query @{ '$top' = 999 } -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
+    Add-CollectionRecords -Records $records -Kind "AZRoleAssignment" -Items $roleAssignments
+    Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($roleAssignments).Count) directory role assignment(s)"
+
+    Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting eligible role schedule instances"
+    $eligibleRoles = Get-GraphCollection -Path "roleManagement/directory/roleEligibilityScheduleInstances" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
+    Add-CollectionRecords -Records $records -Kind "AZRoleEligibilityScheduleInstance" -Items $eligibleRoles
+    Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($eligibleRoles).Count) eligible role schedule instance(s)"
+
+    Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting role management policy assignments"
+    $policyAssignments = Get-GraphCollection -Path "policies/roleManagementPolicyAssignments" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
+    Add-CollectionRecords -Records $records -Kind "AZRoleManagementPolicyAssignment" -Items $policyAssignments
+    Write-AzureHoundStatus -Stage "AZAD" -Message "Collected $(@($policyAssignments).Count) role management policy assignment(s)"
+
     Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting application owners and federated identity credentials"
     foreach ($app in $applications) {
         Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting application relationships for $($app.displayName) [$($app.id)]"
@@ -183,7 +183,7 @@ if (-not $SkipRelationships) {
     }
 }
 else {
-    Write-AzureHoundStatus -Stage "AZAD" -Message "Skipping Entra ID relationship collection"
+    Write-AzureHoundStatus -Stage "AZAD" -Message "Skipping Entra ID relationship, role assignment, and PIM policy collection"
 }
 
 Write-AzureHoundStatus -Stage "AZAD" -Message "Finished Entra ID collection with $($records.Count) record(s)"
