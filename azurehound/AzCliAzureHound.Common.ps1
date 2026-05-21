@@ -279,6 +279,7 @@ function Get-AzureHoundRoleRelationshipKind {
 function Add-AzureHoundRoleAssignmentRecords {
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
         [System.Collections.Generic.List[object]] $Records,
 
         [Parameter(Mandatory = $true)]
@@ -295,6 +296,7 @@ function Add-AzureHoundRoleAssignmentRecords {
 
         [Parameter(Mandatory = $true)]
         [AllowNull()]
+        [AllowEmptyCollection()]
         [object[]] $Assignments
     )
 

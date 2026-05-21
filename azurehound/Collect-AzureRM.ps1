@@ -40,6 +40,7 @@ function Get-ArmCollection {
 function Add-CollectionRecords {
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
         [System.Collections.Generic.List[object]] $Records,
 
         [Parameter(Mandatory = $true)]
@@ -47,6 +48,7 @@ function Add-CollectionRecords {
 
         [Parameter(Mandatory = $true)]
         [AllowNull()]
+        [AllowEmptyCollection()]
         [object[]] $Items,
 
         [string] $SubscriptionId,
@@ -83,10 +85,12 @@ function Get-ScopeRoleAssignments {
 function Add-ResourceRoleAssignments {
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
         [System.Collections.Generic.List[object]] $Records,
 
         [Parameter(Mandatory = $true)]
         [AllowNull()]
+        [AllowEmptyCollection()]
         [object[]] $Resources,
 
         [Parameter(Mandatory = $true)]

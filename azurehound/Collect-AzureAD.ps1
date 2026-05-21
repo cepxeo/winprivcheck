@@ -31,6 +31,7 @@ function Get-GraphCollection {
 function Add-CollectionRecords {
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
         [System.Collections.Generic.List[object]] $Records,
 
         [Parameter(Mandatory = $true)]
@@ -38,6 +39,7 @@ function Add-CollectionRecords {
 
         [Parameter(Mandatory = $true)]
         [AllowNull()]
+        [AllowEmptyCollection()]
         [object[]] $Items
     )
 
