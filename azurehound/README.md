@@ -46,6 +46,11 @@ The output envelope matches AzureHound's file shape:
 }
 ```
 
+When `-OutputPath` is set, AzureAD collection also writes per-category files
+as each step finishes, for example `azure-ad.users.json`,
+`azure-ad.applications.json`, and `azure-ad.role-management-policy-assignments.json`.
+These partial files preserve completed data if a later endpoint is denied.
+
 Use `-ContinueOnError` when you expect partial permissions. Use `-SkipRelationships` or `-ObjectOnly` for a faster object-only inventory that avoids relationship, role assignment, and PIM policy endpoints.
 Use `-MaxPages` or `-MaxItems` to cap each paged request while testing or when a tenant is very large.
 

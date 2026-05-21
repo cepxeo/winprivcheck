@@ -40,6 +40,7 @@ try {
 
         $adParams = @{
             OutputPath = $adOut
+            PartOutputPath = $OutputPath
             SkipAzCliCheck = $true
         }
         if ($MaxPages -gt 0) { $adParams.MaxPages = $MaxPages }

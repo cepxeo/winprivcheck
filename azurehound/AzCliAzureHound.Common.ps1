@@ -375,3 +375,52 @@ function Write-AzureHoundOutput {
         Write-AzureHoundStatus -Stage "OUTPUT" -Message "Saved output to $resolvedOutputPath ($($writtenFile.Length) bytes)"
     }
 }
+
+function Get-AzureHoundPartOutputPath {
+    param(
+        [string] $OutputPath,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Suffix
+    )
+
+    if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+        return $null
+    }
+
+    try {
+        $resolvedOutputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
+    }
+    catch {
+        $resolvedOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
+    }
+
+    $directory = Split-Path -Parent $resolvedOutputPath
+    $fileName = [System.IO.Path]::GetFileNameWithoutExtension($resolvedOutputPath)
+    $extension = [System.IO.Path]::GetExtension($resolvedOutputPath)
+    if ([string]::IsNullOrWhiteSpace($extension)) {
+        $extension = ".json"
+    }
+
+    $safeSuffix = ($Suffix -replace '[^A-Za-z0-9._-]', '-').Trim('-')
+    Join-Path $directory ("{0}.{1}{2}" -f $fileName, $safeSuffix, $extension)
+}
+
+function Write-AzureHoundPartOutput {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Records,
+
+        [string] $OutputPath,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Suffix
+    )
+
+    $partOutputPath = Get-AzureHoundPartOutputPath -OutputPath $OutputPath -Suffix $Suffix
+    if ([string]::IsNullOrWhiteSpace($partOutputPath)) {
+        return
+    }
+
+    Write-AzureHoundOutput -Records $Records -OutputPath $partOutputPath
+}
