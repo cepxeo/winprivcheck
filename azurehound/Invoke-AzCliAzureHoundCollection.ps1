@@ -23,10 +23,12 @@ try {
         $adOut = Join-Path ([System.IO.Path]::GetTempPath()) ("azurehound-ad-{0}.json" -f ([guid]::NewGuid()))
         $tempFiles.Add($adOut)
 
-        $args = @("-OutputPath", $adOut)
-        if ($SkipRelationships) { $args += "-SkipRelationships" }
-        if ($ContinueOnError) { $args += "-ContinueOnError" }
-        & "$PSScriptRoot/Collect-AzureAD.ps1" @args
+        $adParams = @{
+            OutputPath = $adOut
+        }
+        if ($SkipRelationships) { $adParams.SkipRelationships = $true }
+        if ($ContinueOnError) { $adParams.ContinueOnError = $true }
+        & "$PSScriptRoot/Collect-AzureAD.ps1" @adParams
 
         $doc = Get-Content -Path $adOut -Raw | ConvertFrom-Json
         foreach ($record in @($doc.data)) {
@@ -38,18 +40,18 @@ try {
         $rmOut = Join-Path ([System.IO.Path]::GetTempPath()) ("azurehound-rm-{0}.json" -f ([guid]::NewGuid()))
         $tempFiles.Add($rmOut)
 
-        $args = @("-OutputPath", $rmOut)
+        $rmParams = @{
+            OutputPath = $rmOut
+        }
         if (@($SubscriptionId).Count -gt 0) {
-            $args += "-SubscriptionId"
-            $args += $SubscriptionId
+            $rmParams.SubscriptionId = $SubscriptionId
         }
         if (@($ManagementGroupId).Count -gt 0) {
-            $args += "-ManagementGroupId"
-            $args += $ManagementGroupId
+            $rmParams.ManagementGroupId = $ManagementGroupId
         }
-        if ($SkipRelationships) { $args += "-SkipRelationships" }
-        if ($ContinueOnError) { $args += "-ContinueOnError" }
-        & "$PSScriptRoot/Collect-AzureRM.ps1" @args
+        if ($SkipRelationships) { $rmParams.SkipRelationships = $true }
+        if ($ContinueOnError) { $rmParams.ContinueOnError = $true }
+        & "$PSScriptRoot/Collect-AzureRM.ps1" @rmParams
 
         $doc = Get-Content -Path $rmOut -Raw | ConvertFrom-Json
         foreach ($record in @($doc.data)) {
