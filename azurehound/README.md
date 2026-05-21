@@ -12,7 +12,7 @@ az login
 Collect only Entra ID objects:
 
 ```powershell
-./scripts/Invoke-AzCliAzureHoundCollection.ps1 -Scope AzureAD -OutputPath ./azure-ad.json
+./scripts/Invoke-AzCliAzureHoundCollection.ps1 -Scope AzureAD -ObjectOnly -OutputPath ./azure-ad.json
 ```
 
 Collect only Azure Resource Manager objects for selected subscriptions:
@@ -46,7 +46,8 @@ The output envelope matches AzureHound's file shape:
 }
 ```
 
-Use `-ContinueOnError` when you expect partial permissions. Use `-SkipRelationships` for a faster object-only inventory.
+Use `-ContinueOnError` when you expect partial permissions. Use `-SkipRelationships` or `-ObjectOnly` for a faster object-only inventory.
+Use `-MaxPages` or `-MaxItems` to cap each paged request while testing or when a tenant is very large.
 
 The scripts print timestamped status lines for CLI checks, collection phases,
 REST pages, record counts, temporary files, and output writes.

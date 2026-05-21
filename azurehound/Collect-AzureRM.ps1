@@ -3,7 +3,10 @@ param(
     [string[]] $SubscriptionId,
     [string[]] $ManagementGroupId,
     [string] $OutputPath,
+    [int] $MaxPages,
+    [int] $MaxItems,
     [switch] $SkipRelationships,
+    [switch] $SkipAzCliCheck,
     [switch] $ContinueOnError
 )
 
@@ -19,6 +22,8 @@ function Get-ArmCollection {
 
         [hashtable] $Query = @{},
 
+        [int] $MaxPages,
+        [int] $MaxItems,
         [switch] $ContinueOnError
     )
 
@@ -29,7 +34,7 @@ function Get-ArmCollection {
     $queryWithVersion["api-version"] = $ApiVersion
 
     $uri = "https://management.azure.com$Path$(ConvertTo-QueryString -Query $queryWithVersion)"
-    Invoke-AzRestCollection -Uri $uri -ContinueOnError:$ContinueOnError
+    Invoke-AzRestCollection -Uri $uri -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
 }
 
 function Add-CollectionRecords {
@@ -70,6 +75,8 @@ function Get-ScopeRoleAssignments {
     Get-ArmCollection -Path "$ScopeId/providers/Microsoft.Authorization/roleAssignments" `
         -ApiVersion "2015-07-01" `
         -Query @{ '$filter' = "atScope()" } `
+        -MaxPages $MaxPages `
+        -MaxItems $MaxItems `
         -ContinueOnError:$ContinueOnError
 }
 
@@ -102,7 +109,9 @@ function Add-ResourceRoleAssignments {
     }
 }
 
-Assert-AzCliAvailable
+if (-not $SkipAzCliCheck) {
+    Assert-AzCliAvailable
+}
 
 Write-AzureHoundStatus -Stage "AZRM" -Message "Reading active tenant from Azure CLI"
 $tenant = Invoke-AzCliJson -CommandName "az account show" -Arguments @("account", "show", "--only-show-errors")
@@ -112,7 +121,7 @@ Write-AzureHoundStatus -Stage "AZRM" -Message "Active tenant is $tenantId"
 $records = [System.Collections.Generic.List[object]]::new()
 
 Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting subscriptions"
-$subscriptions = Get-ArmCollection -Path "/subscriptions" -ApiVersion "2020-01-01" -ContinueOnError:$ContinueOnError
+$subscriptions = Get-ArmCollection -Path "/subscriptions" -ApiVersion "2020-01-01" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
 if (@($SubscriptionId).Count -gt 0) {
     Write-AzureHoundStatus -Stage "AZRM" -Message "Filtering to requested subscription id(s): $($SubscriptionId -join ', ')"
     $subscriptionSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -129,7 +138,7 @@ foreach ($subscription in $subscriptions) {
 Write-AzureHoundStatus -Stage "AZRM" -Message "Collected $(@($subscriptions).Count) subscription(s)"
 
 Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting management groups"
-$managementGroups = Get-ArmCollection -Path "/providers/Microsoft.Management/managementGroups" -ApiVersion "2020-05-01" -ContinueOnError:$ContinueOnError
+$managementGroups = Get-ArmCollection -Path "/providers/Microsoft.Management/managementGroups" -ApiVersion "2020-05-01" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
 if (@($ManagementGroupId).Count -gt 0) {
     Write-AzureHoundStatus -Stage "AZRM" -Message "Filtering to requested management group id(s): $($ManagementGroupId -join ', ')"
     $mgSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -157,25 +166,25 @@ foreach ($subscription in $subscriptions) {
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting resources for subscription $sid"
 
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting resource groups for subscription $sid"
-    $rgs = Get-ArmCollection -Path "/subscriptions/$sid/resourcegroups" -ApiVersion "2021-04-01" -ContinueOnError:$ContinueOnError
+    $rgs = Get-ArmCollection -Path "/subscriptions/$sid/resourcegroups" -ApiVersion "2021-04-01" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
     foreach ($item in $rgs) { $resourceGroups.Add($item) }
     Add-CollectionRecords -Records $records -Kind "AZResourceGroup" -Items $rgs -SubscriptionId $sid -TenantId $tenantId
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collected $(@($rgs).Count) resource group(s) for subscription $sid"
 
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting key vaults for subscription $sid"
-    $kvs = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.KeyVault/vaults" -ApiVersion "2019-09-01" -ContinueOnError:$ContinueOnError
+    $kvs = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.KeyVault/vaults" -ApiVersion "2019-09-01" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
     foreach ($item in $kvs) { $keyVaults.Add($item) }
     Add-CollectionRecords -Records $records -Kind "AZKeyVault" -Items $kvs -SubscriptionId $sid -TenantId $tenantId
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collected $(@($kvs).Count) key vault(s) for subscription $sid"
 
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting virtual machines for subscription $sid"
-    $vms = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.Compute/virtualMachines" -ApiVersion "2021-07-01" -ContinueOnError:$ContinueOnError
+    $vms = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.Compute/virtualMachines" -ApiVersion "2021-07-01" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
     foreach ($item in $vms) { $virtualMachines.Add($item) }
     Add-CollectionRecords -Records $records -Kind "AZVM" -Items $vms -SubscriptionId $sid -TenantId $tenantId
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collected $(@($vms).Count) virtual machine(s) for subscription $sid"
 
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting web and function apps for subscription $sid"
-    $sites = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.Web/sites" -ApiVersion "2022-03-01" -ContinueOnError:$ContinueOnError
+    $sites = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.Web/sites" -ApiVersion "2022-03-01" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
     $funcs = @($sites | Where-Object { $_.kind -match "functionapp" })
     $apps = @($sites | Where-Object { $_.kind -notmatch "functionapp" })
     foreach ($item in $funcs) { $functionApps.Add($item) }
@@ -185,31 +194,31 @@ foreach ($subscription in $subscriptions) {
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collected $(@($funcs).Count) function app(s) and $(@($apps).Count) web app(s) for subscription $sid"
 
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting automation accounts for subscription $sid"
-    $automation = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.Automation/automationAccounts" -ApiVersion "2021-06-22" -ContinueOnError:$ContinueOnError
+    $automation = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.Automation/automationAccounts" -ApiVersion "2021-06-22" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
     foreach ($item in $automation) { $automationAccounts.Add($item) }
     Add-CollectionRecords -Records $records -Kind "AZAutomationAccount" -Items $automation -SubscriptionId $sid -TenantId $tenantId
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collected $(@($automation).Count) automation account(s) for subscription $sid"
 
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting container registries for subscription $sid"
-    $registries = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.ContainerRegistry/registries" -ApiVersion "2023-01-01-preview" -ContinueOnError:$ContinueOnError
+    $registries = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.ContainerRegistry/registries" -ApiVersion "2023-01-01-preview" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
     foreach ($item in $registries) { $containerRegistries.Add($item) }
     Add-CollectionRecords -Records $records -Kind "AZContainerRegistry" -Items $registries -SubscriptionId $sid -TenantId $tenantId
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collected $(@($registries).Count) container registries for subscription $sid"
 
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting logic apps for subscription $sid"
-    $workflows = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.Logic/workflows" -ApiVersion "2016-06-01" -ContinueOnError:$ContinueOnError
+    $workflows = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.Logic/workflows" -ApiVersion "2016-06-01" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
     foreach ($item in $workflows) { $logicApps.Add($item) }
     Add-CollectionRecords -Records $records -Kind "AZLogicApp" -Items $workflows -SubscriptionId $sid -TenantId $tenantId
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collected $(@($workflows).Count) logic app(s) for subscription $sid"
 
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting managed clusters for subscription $sid"
-    $clusters = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.ContainerService/managedClusters" -ApiVersion "2021-07-01" -ContinueOnError:$ContinueOnError
+    $clusters = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.ContainerService/managedClusters" -ApiVersion "2021-07-01" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
     foreach ($item in $clusters) { $managedClusters.Add($item) }
     Add-CollectionRecords -Records $records -Kind "AZManagedCluster" -Items $clusters -SubscriptionId $sid -TenantId $tenantId
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collected $(@($clusters).Count) managed cluster(s) for subscription $sid"
 
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting virtual machine scale sets for subscription $sid"
-    $scaleSets = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.Compute/virtualMachineScaleSets" -ApiVersion "2022-11-01" -ContinueOnError:$ContinueOnError
+    $scaleSets = Get-ArmCollection -Path "/subscriptions/$sid/providers/Microsoft.Compute/virtualMachineScaleSets" -ApiVersion "2022-11-01" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
     foreach ($item in $scaleSets) { $vmScaleSets.Add($item) }
     Add-CollectionRecords -Records $records -Kind "AZVMScaleSet" -Items $scaleSets -SubscriptionId $sid -TenantId $tenantId
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collected $(@($scaleSets).Count) virtual machine scale set(s) for subscription $sid"
@@ -219,7 +228,7 @@ if (-not $SkipRelationships) {
     Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting Azure RM relationships and role assignments"
     foreach ($group in $managementGroups) {
         Write-AzureHoundStatus -Stage "AZRM" -Message "Collecting descendants and role assignments for management group $($group.name)"
-        $descendants = Get-ArmCollection -Path "/providers/Microsoft.Management/managementGroups/$($group.name)/descendants" -ApiVersion "2020-05-01" -ContinueOnError:$ContinueOnError
+        $descendants = Get-ArmCollection -Path "/providers/Microsoft.Management/managementGroups/$($group.name)/descendants" -ApiVersion "2020-05-01" -MaxPages $MaxPages -MaxItems $MaxItems -ContinueOnError:$ContinueOnError
         foreach ($descendant in $descendants) {
             $records.Add((New-AzureHoundRecord -Kind "AZManagementGroupDescendant" -Data ([pscustomobject]@{
                 managementGroupId = $group.id

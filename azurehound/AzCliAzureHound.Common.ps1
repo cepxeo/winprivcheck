@@ -11,6 +11,10 @@ function Write-AzureHoundStatus {
 }
 
 function Assert-AzCliAvailable {
+    if ($script:AzCliAccountChecked) {
+        return
+    }
+
     Write-AzureHoundStatus -Stage "CHECK" -Message "Checking Azure CLI availability"
     if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
         throw "Azure CLI (az) was not found on PATH."
@@ -26,6 +30,7 @@ function Assert-AzCliAvailable {
         throw $message
     }
     Write-AzureHoundStatus -Stage "CHECK" -Message "Azure CLI account is available"
+    $script:AzCliAccountChecked = $true
 }
 
 function ConvertTo-QueryString {
@@ -131,14 +136,30 @@ function Invoke-AzRestCollection {
         [Parameter(Mandatory = $true)]
         [string] $Uri,
 
+        [int] $MaxPages,
+        [int] $MaxItems,
         [switch] $ContinueOnError
     )
 
     $items = [System.Collections.Generic.List[object]]::new()
+    $visitedLinks = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $next = $Uri
     $page = 1
 
     while (-not [string]::IsNullOrWhiteSpace($next)) {
+        if ($MaxPages -gt 0 -and $page -gt $MaxPages) {
+            Write-AzureHoundStatus -Stage "REST" -Message "Stopping after MaxPages=$MaxPages with $($items.Count) item(s)"
+            break
+        }
+        if (-not $visitedLinks.Add($next)) {
+            $message = "Repeated pagination link detected on page $page. Stopping request cycle for $next"
+            if ($ContinueOnError) {
+                Write-Warning $message
+                break
+            }
+            throw $message
+        }
+
         Write-AzureHoundStatus -Stage "REST" -Message "Requesting page $page`: $next"
         $response = Invoke-AzCliJson -CommandName "az rest $next" -Arguments @("rest", "--method", "get", "--uri", $next, "--only-show-errors") -ContinueOnError:$ContinueOnError
 
@@ -148,11 +169,21 @@ function Invoke-AzRestCollection {
 
         if ($null -ne $response.value) {
             foreach ($item in @($response.value)) {
+                if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) {
+                    break
+                }
                 $items.Add($item)
             }
         }
         else {
-            $items.Add($response)
+            if ($MaxItems -le 0 -or $items.Count -lt $MaxItems) {
+                $items.Add($response)
+            }
+        }
+
+        if ($MaxItems -gt 0 -and $items.Count -ge $MaxItems) {
+            Write-AzureHoundStatus -Stage "REST" -Message "Stopping after MaxItems=$MaxItems"
+            break
         }
 
         if ($response.PSObject.Properties.Name -contains "@odata.nextLink") {

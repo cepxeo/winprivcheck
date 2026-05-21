@@ -7,6 +7,9 @@ param(
 
     [string[]] $SubscriptionId,
     [string[]] $ManagementGroupId,
+    [int] $MaxPages,
+    [int] $MaxItems,
+    [switch] $ObjectOnly,
     [switch] $SkipRelationships,
     [switch] $ContinueOnError
 )
@@ -16,6 +19,9 @@ param(
 Write-AzureHoundStatus -Stage "START" -Message "Starting AzureHound Azure CLI collection with scope $Scope"
 Write-AzureHoundStatus -Stage "START" -Message "Requested output path: $OutputPath"
 Assert-AzCliAvailable
+if ($ObjectOnly) {
+    $SkipRelationships = $true
+}
 
 $records = [System.Collections.Generic.List[object]]::new()
 $tempFiles = [System.Collections.Generic.List[string]]::new()
@@ -23,16 +29,29 @@ $tempFiles = [System.Collections.Generic.List[string]]::new()
 try {
     if ($Scope -in @("All", "AzureAD")) {
         Write-AzureHoundStatus -Stage "AZAD" -Message "Starting Entra ID collection"
-        $adOut = Join-Path ([System.IO.Path]::GetTempPath()) ("azurehound-ad-{0}.json" -f ([guid]::NewGuid()))
-        $tempFiles.Add($adOut)
-        Write-AzureHoundStatus -Stage "AZAD" -Message "Using temporary Entra ID output $adOut"
+        $adOut = if ($Scope -eq "AzureAD") { $OutputPath } else { Join-Path ([System.IO.Path]::GetTempPath()) ("azurehound-ad-{0}.json" -f ([guid]::NewGuid())) }
+        if ($Scope -ne "AzureAD") {
+            $tempFiles.Add($adOut)
+            Write-AzureHoundStatus -Stage "AZAD" -Message "Using temporary Entra ID output $adOut"
+        }
+        else {
+            Write-AzureHoundStatus -Stage "AZAD" -Message "Writing Entra ID output directly to $OutputPath"
+        }
 
         $adParams = @{
             OutputPath = $adOut
+            SkipAzCliCheck = $true
         }
+        if ($MaxPages -gt 0) { $adParams.MaxPages = $MaxPages }
+        if ($MaxItems -gt 0) { $adParams.MaxItems = $MaxItems }
         if ($SkipRelationships) { $adParams.SkipRelationships = $true }
         if ($ContinueOnError) { $adParams.ContinueOnError = $true }
         & "$PSScriptRoot/Collect-AzureAD.ps1" @adParams
+
+        if ($Scope -eq "AzureAD") {
+            Write-AzureHoundStatus -Stage "DONE" -Message "Finished Entra ID collection"
+            return
+        }
 
         Write-AzureHoundStatus -Stage "AZAD" -Message "Merging Entra ID records from $adOut"
         $doc = Get-Content -Path $adOut -Raw | ConvertFrom-Json
@@ -44,13 +63,21 @@ try {
 
     if ($Scope -in @("All", "AzureRM")) {
         Write-AzureHoundStatus -Stage "AZRM" -Message "Starting Azure Resource Manager collection"
-        $rmOut = Join-Path ([System.IO.Path]::GetTempPath()) ("azurehound-rm-{0}.json" -f ([guid]::NewGuid()))
-        $tempFiles.Add($rmOut)
-        Write-AzureHoundStatus -Stage "AZRM" -Message "Using temporary Azure RM output $rmOut"
+        $rmOut = if ($Scope -eq "AzureRM") { $OutputPath } else { Join-Path ([System.IO.Path]::GetTempPath()) ("azurehound-rm-{0}.json" -f ([guid]::NewGuid())) }
+        if ($Scope -ne "AzureRM") {
+            $tempFiles.Add($rmOut)
+            Write-AzureHoundStatus -Stage "AZRM" -Message "Using temporary Azure RM output $rmOut"
+        }
+        else {
+            Write-AzureHoundStatus -Stage "AZRM" -Message "Writing Azure RM output directly to $OutputPath"
+        }
 
         $rmParams = @{
             OutputPath = $rmOut
+            SkipAzCliCheck = $true
         }
+        if ($MaxPages -gt 0) { $rmParams.MaxPages = $MaxPages }
+        if ($MaxItems -gt 0) { $rmParams.MaxItems = $MaxItems }
         if (@($SubscriptionId).Count -gt 0) {
             $rmParams.SubscriptionId = $SubscriptionId
         }
@@ -60,6 +87,11 @@ try {
         if ($SkipRelationships) { $rmParams.SkipRelationships = $true }
         if ($ContinueOnError) { $rmParams.ContinueOnError = $true }
         & "$PSScriptRoot/Collect-AzureRM.ps1" @rmParams
+
+        if ($Scope -eq "AzureRM") {
+            Write-AzureHoundStatus -Stage "DONE" -Message "Finished Azure RM collection"
+            return
+        }
 
         Write-AzureHoundStatus -Stage "AZRM" -Message "Merging Azure RM records from $rmOut"
         $doc = Get-Content -Path $rmOut -Raw | ConvertFrom-Json
