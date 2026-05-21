@@ -17,19 +17,11 @@ function Assert-AzCliAvailable {
     }
 
     Write-AzureHoundStatus -Stage "CHECK" -Message "Checking active Azure CLI account"
-    $azAccountError = [System.IO.Path]::GetTempFileName()
-    try {
-        $null = az account show --only-show-errors 2>$azAccountError
-        $accountError = Get-Content -Path $azAccountError -Raw -ErrorAction SilentlyContinue
-    }
-    finally {
-        Remove-Item -Path $azAccountError -Force -ErrorAction SilentlyContinue
-    }
-
-    if ($LASTEXITCODE -ne 0) {
+    $accountResult = Invoke-AzCliCommand -Arguments @("account", "show", "--only-show-errors")
+    if ($accountResult.ExitCode -ne 0) {
         $message = "Azure CLI is not logged in or cannot read the active account. Run 'az login' before collecting data."
-        if (-not [string]::IsNullOrWhiteSpace($accountError)) {
-            $message = "$message`naz account show: $($accountError.Trim())"
+        if (-not [string]::IsNullOrWhiteSpace($accountResult.Stderr)) {
+            $message = "$message`naz account show: $($accountResult.Stderr.Trim())"
         }
         throw $message
     }
@@ -55,45 +47,74 @@ function ConvertTo-QueryString {
     return "?" + ($pairs -join "&")
 }
 
+function Invoke-AzCliCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]] $Arguments
+    )
+
+    $stdoutPath = [System.IO.Path]::GetTempFileName()
+    $stderrPath = [System.IO.Path]::GetTempFileName()
+    try {
+        $quotedArguments = foreach ($argument in $Arguments) {
+            '"{0}"' -f ([string] $argument).Replace('"', '\"')
+        }
+        $process = Start-Process -FilePath "az" `
+            -ArgumentList $quotedArguments `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+
+        [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            Stdout = Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue
+            Stderr = Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Invoke-AzCliJson {
     param(
         [Parameter(Mandatory = $true)]
         [string] $CommandName,
 
         [Parameter(Mandatory = $true)]
-        [scriptblock] $ScriptBlock,
+        [string[]] $Arguments,
 
         [switch] $ContinueOnError
     )
 
-    $stderrPath = [System.IO.Path]::GetTempFileName()
     try {
-        $json = & $ScriptBlock 2>$stderrPath
-        $stderr = Get-Content -Path $stderrPath -Raw -ErrorAction SilentlyContinue
-        $stdout = ($json | ForEach-Object { [string] $_ }) -join "`n"
-        if ($LASTEXITCODE -ne 0) {
+        $result = Invoke-AzCliCommand -Arguments $Arguments
+        if ($result.ExitCode -ne 0) {
             $details = [System.Collections.Generic.List[string]]::new()
-            if (-not [string]::IsNullOrWhiteSpace($stderr)) {
-                $details.Add($stderr.Trim())
+            if (-not [string]::IsNullOrWhiteSpace($result.Stderr)) {
+                $details.Add($result.Stderr.Trim())
             }
-            if (-not [string]::IsNullOrWhiteSpace($stdout)) {
-                $details.Add($stdout.Trim())
+            if (-not [string]::IsNullOrWhiteSpace($result.Stdout)) {
+                $details.Add($result.Stdout.Trim())
             }
 
-            $message = "$CommandName failed with exit code $LASTEXITCODE"
+            $message = "$CommandName failed with exit code $($result.ExitCode)"
             if ($details.Count -gt 0) {
                 $message = "$message`: $($details -join "`n")"
             }
             throw $message
         }
-        if ([string]::IsNullOrWhiteSpace($stdout)) {
+        if ([string]::IsNullOrWhiteSpace($result.Stdout)) {
             return $null
         }
         try {
-            return $json | ConvertFrom-Json
+            return $result.Stdout | ConvertFrom-Json
         }
         catch {
-            throw "$CommandName returned invalid JSON: $($stdout.Trim())"
+            throw "$CommandName returned invalid JSON: $($result.Stdout.Trim())"
         }
     }
     catch {
@@ -102,9 +123,6 @@ function Invoke-AzCliJson {
             return $null
         }
         throw
-    }
-    finally {
-        Remove-Item -Path $stderrPath -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -122,9 +140,7 @@ function Invoke-AzRestCollection {
 
     while (-not [string]::IsNullOrWhiteSpace($next)) {
         Write-AzureHoundStatus -Stage "REST" -Message "Requesting page $page`: $next"
-        $response = Invoke-AzCliJson -CommandName "az rest $next" -ContinueOnError:$ContinueOnError -ScriptBlock {
-            az rest --method get --uri $next --only-show-errors
-        }
+        $response = Invoke-AzCliJson -CommandName "az rest $next" -Arguments @("rest", "--method", "get", "--uri", $next, "--only-show-errors") -ContinueOnError:$ContinueOnError
 
         if ($null -eq $response) {
             break

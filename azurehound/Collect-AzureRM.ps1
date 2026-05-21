@@ -105,9 +105,7 @@ function Add-ResourceRoleAssignments {
 Assert-AzCliAvailable
 
 Write-AzureHoundStatus -Stage "AZRM" -Message "Reading active tenant from Azure CLI"
-$tenant = Invoke-AzCliJson -CommandName "az account show" -ScriptBlock {
-    az account show --only-show-errors
-}
+$tenant = Invoke-AzCliJson -CommandName "az account show" -Arguments @("account", "show", "--only-show-errors")
 $tenantId = $tenant.tenantId
 Write-AzureHoundStatus -Stage "AZRM" -Message "Active tenant is $tenantId"
 
