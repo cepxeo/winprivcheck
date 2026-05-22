@@ -9,6 +9,8 @@ param(
     [string[]] $ManagementGroupId,
     [int] $MaxPages,
     [int] $MaxItems,
+    [ValidateRange(1, 100000)]
+    [int] $ProgressSaveInterval = 25,
     [switch] $ObjectOnly,
     [switch] $SkipRelationships,
     [switch] $ContinueOnError
@@ -45,6 +47,7 @@ try {
         }
         if ($MaxPages -gt 0) { $adParams.MaxPages = $MaxPages }
         if ($MaxItems -gt 0) { $adParams.MaxItems = $MaxItems }
+        $adParams.ProgressSaveInterval = $ProgressSaveInterval
         if ($SkipRelationships) { $adParams.SkipRelationships = $true }
         if ($ContinueOnError) { $adParams.ContinueOnError = $true }
         & "$PSScriptRoot/Collect-AzureAD.ps1" @adParams

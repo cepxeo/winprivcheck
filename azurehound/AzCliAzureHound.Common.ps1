@@ -84,6 +84,39 @@ function Invoke-AzCliCommand {
     }
 }
 
+function Test-AzCliInteractionRequiredError {
+    param([AllowNull()][string] $Message)
+
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        return $false
+    }
+
+    return (
+        $Message -match 'InteractionRequired' -or
+        $Message -match 'TokenCreatedWithOutdatedPolicies' -or
+        $Message -match 'Continuous access evaluation resulted in challenge' -or
+        $Message -match 'InvalidAuthenticationToken'
+    )
+}
+
+function Wait-AzCliInteractiveAuthentication {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $CommandName,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Message
+    )
+
+    Write-Warning ("Interactive authentication is required while running {0}: {1}" -f $CommandName, $Message)
+    Write-AzureHoundStatus -Stage "AUTH" -Message "Azure CLI token refresh is required before collection can continue."
+    Write-AzureHoundStatus -Stage "AUTH" -Message "In another terminal, run: az logout"
+    Write-AzureHoundStatus -Stage "AUTH" -Message "Then run: az login"
+    Write-AzureHoundStatus -Stage "AUTH" -Message "After the login completes, return here and press Enter to retry the request."
+    [void](Read-Host "Press Enter after refreshing Azure CLI authentication, or press Ctrl+C to stop")
+    $script:AzCliAccountChecked = $false
+}
+
 function Invoke-AzCliJson {
     param(
         [Parameter(Mandatory = $true)]
@@ -96,30 +129,39 @@ function Invoke-AzCliJson {
     )
 
     try {
-        $result = Invoke-AzCliCommand -Arguments $Arguments
-        if ($result.ExitCode -ne 0) {
-            $details = [System.Collections.Generic.List[string]]::new()
-            if (-not [string]::IsNullOrWhiteSpace($result.Stderr)) {
-                $details.Add($result.Stderr.Trim())
-            }
-            if (-not [string]::IsNullOrWhiteSpace($result.Stdout)) {
-                $details.Add($result.Stdout.Trim())
+        while ($true) {
+            $result = Invoke-AzCliCommand -Arguments $Arguments
+            if ($result.ExitCode -ne 0) {
+                $details = [System.Collections.Generic.List[string]]::new()
+                if (-not [string]::IsNullOrWhiteSpace($result.Stderr)) {
+                    $details.Add($result.Stderr.Trim())
+                }
+                if (-not [string]::IsNullOrWhiteSpace($result.Stdout)) {
+                    $details.Add($result.Stdout.Trim())
+                }
+
+                $message = "$CommandName failed with exit code $($result.ExitCode)"
+                if ($details.Count -gt 0) {
+                    $message = "$message`: $($details -join "`n")"
+                }
+
+                if (Test-AzCliInteractionRequiredError -Message $message) {
+                    Wait-AzCliInteractiveAuthentication -CommandName $CommandName -Message $message
+                    continue
+                }
+
+                throw $message
             }
 
-            $message = "$CommandName failed with exit code $($result.ExitCode)"
-            if ($details.Count -gt 0) {
-                $message = "$message`: $($details -join "`n")"
+            if ([string]::IsNullOrWhiteSpace($result.Stdout)) {
+                return $null
             }
-            throw $message
-        }
-        if ([string]::IsNullOrWhiteSpace($result.Stdout)) {
-            return $null
-        }
-        try {
-            return $result.Stdout | ConvertFrom-Json
-        }
-        catch {
-            throw "$CommandName returned invalid JSON: $($result.Stdout.Trim())"
+            try {
+                return $result.Stdout | ConvertFrom-Json
+            }
+            catch {
+                throw "$CommandName returned invalid JSON: $($result.Stdout.Trim())"
+            }
         }
     }
     catch {

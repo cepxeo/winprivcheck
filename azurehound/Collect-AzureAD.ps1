@@ -4,6 +4,8 @@ param(
     [string] $PartOutputPath,
     [int] $MaxPages,
     [int] $MaxItems,
+    [ValidateRange(1, 100000)]
+    [int] $ProgressSaveInterval = 25,
     [switch] $SkipRelationships,
     [switch] $SkipAzCliCheck,
     [switch] $ContinueOnError
@@ -155,6 +157,32 @@ function Add-StepRecord {
     $StepRecords.Add($record)
 }
 
+function Save-StepProgress {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [System.Collections.Generic.List[object]] $Records,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Suffix,
+
+        [Parameter(Mandatory = $true)]
+        [int] $CurrentIndex,
+
+        [Parameter(Mandatory = $true)]
+        [int] $TotalCount,
+
+        [switch] $Force
+    )
+
+    if (-not $Force -and ($CurrentIndex % $ProgressSaveInterval) -ne 0) {
+        return
+    }
+
+    Write-AzureHoundStatus -Stage "SAVE" -Message "Checkpointing $Suffix after $CurrentIndex/$TotalCount item(s)"
+    Write-AzureHoundPartOutput -Records $Records -OutputPath $SplitOutputPath -Suffix $Suffix
+}
+
 if (-not $SkipAzCliCheck) {
     Assert-AzCliAvailable
 }
@@ -178,7 +206,9 @@ if (-not $SkipRelationships) {
     Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting application owners and federated identity credentials"
     $appOwnerRecords = [System.Collections.Generic.List[object]]::new()
     $ficRecords = [System.Collections.Generic.List[object]]::new()
+    $appIndex = 0
     foreach ($app in $applications) {
+        $appIndex++
         Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting application relationships for $($app.displayName) [$($app.id)]"
         $owners = Get-GraphCollectionOrEmpty -Label "application owners for $($app.id)" -Path "applications/$($app.id)/owners" -Query @{ '$top' = 99 } -UseBeta
         $ownerItems = foreach ($owner in $owners) {
@@ -191,6 +221,7 @@ if (-not $SkipRelationships) {
             appId = $app.appId
             owners = @($ownerItems)
         })
+        Save-StepProgress -Records $appOwnerRecords -Suffix "application-owners" -CurrentIndex $appIndex -TotalCount (@($applications).Count)
 
         $fics = Get-GraphCollectionOrEmpty -Label "federated identity credentials for application $($app.id)" -Path "applications/$($app.id)/federatedIdentityCredentials" -Query @{ '$top' = 99 } -UseBeta
         foreach ($fic in $fics) {
@@ -199,14 +230,18 @@ if (-not $SkipRelationships) {
                 federatedIdentityCredential = $fic
             })
         }
+
+        Save-StepProgress -Records $ficRecords -Suffix "federated-identity-credentials" -CurrentIndex $appIndex -TotalCount (@($applications).Count)
     }
-    Write-AzureHoundPartOutput -Records $appOwnerRecords -OutputPath $SplitOutputPath -Suffix "application-owners"
-    Write-AzureHoundPartOutput -Records $ficRecords -OutputPath $SplitOutputPath -Suffix "federated-identity-credentials"
+    Save-StepProgress -Records $appOwnerRecords -Suffix "application-owners" -CurrentIndex (@($applications).Count) -TotalCount (@($applications).Count) -Force
+    Save-StepProgress -Records $ficRecords -Suffix "federated-identity-credentials" -CurrentIndex (@($applications).Count) -TotalCount (@($applications).Count) -Force
 
     Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting group owners and members"
     $groupOwnerRecords = [System.Collections.Generic.List[object]]::new()
     $groupMemberRecords = [System.Collections.Generic.List[object]]::new()
+    $groupIndex = 0
     foreach ($group in $groups) {
+        $groupIndex++
         Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting group relationships for $($group.displayName) [$($group.id)]"
         $owners = Get-GraphCollectionOrEmpty -Label "group owners for $($group.id)" -Path "groups/$($group.id)/owners" -Query @{ '$top' = 999 }
         $ownerItems = foreach ($owner in $owners) {
@@ -219,6 +254,7 @@ if (-not $SkipRelationships) {
             groupId = $group.id
             owners = @($ownerItems)
         })
+        Save-StepProgress -Records $groupOwnerRecords -Suffix "group-owners" -CurrentIndex $groupIndex -TotalCount (@($groups).Count)
 
         $members = Get-GraphCollectionOrEmpty -Label "group members for $($group.id)" -Path "groups/$($group.id)/members" -Query @{ '$top' = 999 }
         $memberItems = foreach ($member in $members) {
@@ -231,14 +267,18 @@ if (-not $SkipRelationships) {
             groupId = $group.id
             members = @($memberItems)
         })
+
+        Save-StepProgress -Records $groupMemberRecords -Suffix "group-members" -CurrentIndex $groupIndex -TotalCount (@($groups).Count)
     }
-    Write-AzureHoundPartOutput -Records $groupOwnerRecords -OutputPath $SplitOutputPath -Suffix "group-owners"
-    Write-AzureHoundPartOutput -Records $groupMemberRecords -OutputPath $SplitOutputPath -Suffix "group-members"
+    Save-StepProgress -Records $groupOwnerRecords -Suffix "group-owners" -CurrentIndex (@($groups).Count) -TotalCount (@($groups).Count) -Force
+    Save-StepProgress -Records $groupMemberRecords -Suffix "group-members" -CurrentIndex (@($groups).Count) -TotalCount (@($groups).Count) -Force
 
     Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting service principal owners and app role assignments"
     $servicePrincipalOwnerRecords = [System.Collections.Generic.List[object]]::new()
     $appRoleAssignmentRecords = [System.Collections.Generic.List[object]]::new()
+    $servicePrincipalIndex = 0
     foreach ($sp in $servicePrincipals) {
+        $servicePrincipalIndex++
         Write-AzureHoundStatus -Stage "AZAD" -Message "Collecting service principal relationships for $($sp.displayName) [$($sp.id)]"
         $owners = Get-GraphCollectionOrEmpty -Label "service principal owners for $($sp.id)" -Path "servicePrincipals/$($sp.id)/owners" -Query @{ '$top' = 999 }
         $ownerItems = foreach ($owner in $owners) {
@@ -251,6 +291,7 @@ if (-not $SkipRelationships) {
             servicePrincipalId = $sp.id
             owners = @($ownerItems)
         })
+        Save-StepProgress -Records $servicePrincipalOwnerRecords -Suffix "service-principal-owners" -CurrentIndex $servicePrincipalIndex -TotalCount (@($servicePrincipals).Count)
 
         $appRoleAssignments = Get-GraphCollectionOrEmpty -Label "app role assignments for service principal $($sp.id)" -Path "servicePrincipals/$($sp.id)/appRoleAssignedTo" -Query @{ '$top' = 999 }
         foreach ($assignment in $appRoleAssignments) {
@@ -259,9 +300,11 @@ if (-not $SkipRelationships) {
                 appRoleAssignment = $assignment
             })
         }
+
+        Save-StepProgress -Records $appRoleAssignmentRecords -Suffix "app-role-assignments" -CurrentIndex $servicePrincipalIndex -TotalCount (@($servicePrincipals).Count)
     }
-    Write-AzureHoundPartOutput -Records $servicePrincipalOwnerRecords -OutputPath $SplitOutputPath -Suffix "service-principal-owners"
-    Write-AzureHoundPartOutput -Records $appRoleAssignmentRecords -OutputPath $SplitOutputPath -Suffix "app-role-assignments"
+    Save-StepProgress -Records $servicePrincipalOwnerRecords -Suffix "service-principal-owners" -CurrentIndex (@($servicePrincipals).Count) -TotalCount (@($servicePrincipals).Count) -Force
+    Save-StepProgress -Records $appRoleAssignmentRecords -Suffix "app-role-assignments" -CurrentIndex (@($servicePrincipals).Count) -TotalCount (@($servicePrincipals).Count) -Force
 }
 else {
     Write-AzureHoundStatus -Stage "AZAD" -Message "Skipping Entra ID relationship, role assignment, and PIM policy collection"

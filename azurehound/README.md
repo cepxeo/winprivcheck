@@ -53,9 +53,19 @@ These partial files preserve completed data if a later endpoint is denied.
 
 Use `-ContinueOnError` when you expect partial permissions. Use `-SkipRelationships` or `-ObjectOnly` for a faster object-only inventory that avoids relationship, role assignment, and PIM policy endpoints.
 Use `-MaxPages` or `-MaxItems` to cap each paged request while testing or when a tenant is very large.
+Long-running relationship stages checkpoint partial files every 25 source
+objects by default. Use `-ProgressSaveInterval 1` to save after every
+application, group, or service principal when you want minimum data loss during
+interruptions.
 
 The scripts print timestamped status lines for CLI checks, collection phases,
 REST pages, record counts, temporary files, and output writes.
+
+If Microsoft Graph returns a Continuous Access Evaluation challenge such as
+`InteractionRequired` or `TokenCreatedWithOutdatedPolicies`, collection pauses
+instead of skipping the request. Refresh Azure CLI authentication in another
+terminal with `az logout` and `az login`, then press Enter in the collector
+window to retry the failed request.
 
 If an `az rest` call fails with exit code 1, rerun with `-ContinueOnError`
 to collect everything your current token can read while warning on denied
