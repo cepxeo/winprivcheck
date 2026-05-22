@@ -224,6 +224,17 @@ function Get-ResourceNameFromId {
     return ($ResourceId.TrimEnd([char]"/") -split "/")[-1]
 }
 
+function Get-NamedCollectionItems {
+    param([AllowNull()][object] $Items)
+
+    return @($Items | Where-Object {
+        $null -ne $_ -and
+        $_ -isnot [string] -and
+        $null -ne $_.PSObject.Properties["name"] -and
+        -not [string]::IsNullOrWhiteSpace([string]$_.name)
+    })
+}
+
 function ConvertTo-Base64Sha256 {
     param([AllowNull()][string] $Content)
 
@@ -387,11 +398,14 @@ foreach ($subscription in $subscriptions) {
         $secretList = Invoke-AzCliJson -CommandName "az keyvault secret list $vaultName" -Arguments @("keyvault", "secret", "list", "--vault-name", $vaultName, "--only-show-errors") -ContinueOnError
         $keyList = Invoke-AzCliJson -CommandName "az keyvault key list $vaultName" -Arguments @("keyvault", "key", "list", "--vault-name", $vaultName, "--only-show-errors") -ContinueOnError
         $certList = Invoke-AzCliJson -CommandName "az keyvault certificate list $vaultName" -Arguments @("keyvault", "certificate", "list", "--vault-name", $vaultName, "--only-show-errors") -ContinueOnError
+        $namedSecrets = Get-NamedCollectionItems -Items $secretList
+        $namedKeys = Get-NamedCollectionItems -Items $keyList
+        $namedCertificates = Get-NamedCollectionItems -Items $certList
 
         $secretValues = @()
         $certificateSecretValues = @()
         if ($IncludeSecretValues) {
-            foreach ($secret in @($secretList)) {
+            foreach ($secret in $namedSecrets) {
                 $secretName = $secret.name
                 $secretValue = Invoke-AzCliJsonSafe -Name "az keyvault secret show $vaultName/$secretName" -Arguments @("keyvault", "secret", "show", "--vault-name", $vaultName, "--name", $secretName, "--only-show-errors")
                 if ($null -ne $secretValue) {
@@ -405,7 +419,7 @@ foreach ($subscription in $subscriptions) {
                 }
             }
 
-            foreach ($certificate in @($certList)) {
+            foreach ($certificate in $namedCertificates) {
                 $certificateName = $certificate.name
                 $certificateSecret = Invoke-AzCliJsonSafe -Name "az keyvault secret show certificate $vaultName/$certificateName" -Arguments @("keyvault", "secret", "show", "--vault-name", $vaultName, "--name", $certificateName, "--only-show-errors")
                 if ($null -ne $certificateSecret) {
@@ -431,12 +445,12 @@ foreach ($subscription in $subscriptions) {
             enableSoftDelete = $vault.properties.enableSoftDelete
             publicNetworkAccess = $vault.properties.publicNetworkAccess
             accessPolicies = $vault.properties.accessPolicies
-            readableSecrets = @($secretList).Count
-            readableKeys = @($keyList).Count
-            readableCertificates = @($certList).Count
+            readableSecrets = @($namedSecrets).Count
+            readableKeys = @($namedKeys).Count
+            readableCertificates = @($namedCertificates).Count
             secrets = ConvertTo-SafeValue -Value $secretValues
-            keys = $keyList
-            certificates = $certList
+            keys = $namedKeys
+            certificates = $namedCertificates
             certificateSecrets = ConvertTo-SafeValue -Value $certificateSecretValues
         }
         $vaultRecords.Add((Add-Record -Kind "MBKeyVaultCheck" -Data $data))
