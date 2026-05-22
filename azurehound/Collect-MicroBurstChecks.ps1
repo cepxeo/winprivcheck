@@ -351,16 +351,20 @@ function Invoke-AppConfigurationCollectionSafe {
 
 function Get-SubscriptionsToCollect {
     $all = Invoke-AzRestCollectionSafe -Name "subscriptions" -Uri "https://management.azure.com/subscriptions?api-version=2020-01-01"
-    if (@($SubscriptionId).Count -eq 0) {
+    $requestedSubscriptionIds = @($SubscriptionId | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($requestedSubscriptionIds.Count -eq 0) {
+        Write-AzureHoundStatus -Stage "MB" -Message "No SubscriptionId filter provided; collecting all $(@($all).Count) subscription(s)"
         return @($all)
     }
 
     $selected = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($id in $SubscriptionId) {
+    foreach ($id in $requestedSubscriptionIds) {
         $null = $selected.Add($id.Trim([char]"/").Split("/")[-1])
     }
 
-    return @($all | Where-Object { $selected.Contains($_.subscriptionId) })
+    $filtered = @($all | Where-Object { $selected.Contains($_.subscriptionId) })
+    Write-AzureHoundStatus -Stage "MB" -Message "SubscriptionId filter matched $($filtered.Count) of $(@($all).Count) subscription(s)"
+    return $filtered
 }
 
 $subscriptions = Get-SubscriptionsToCollect
